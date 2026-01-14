@@ -5,6 +5,7 @@ import requests
 import re
 import gc
 import psutil 
+import sys
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -374,6 +375,18 @@ def tarefa_fechamento_dia(driver):
     enviar_mensagem_evolution(msg, "DONO")
     estatisticas_dia['pico'] = 0; estatisticas_dia['fechamento_enviado'] = True; salvar_dados()
 
+def tarefa_reiniciar_bot(driver, motivo):
+    """Fecha o navegador e mata o processo. O EasyPanel reinicia sozinho."""
+    print(f"🔄 [RESTART] Reiniciando: {motivo}")
+    try:
+        msg = f"♻️ *REINÍCIO AUTOMÁTICO (3h)*\n\nMotivo: {motivo}\nVoltaremos em alguns segundos..."
+        enviar_mensagem_evolution(msg, ADMINS_TECNICOS)
+        driver.quit()
+    except: pass
+    
+    time.sleep(2)
+    sys.exit(0) # Isso encerra o Python e o Docker reinicia ele limpo
+
 # ==============================================================================
 # 🔄 6. LOOP PRINCIPAL
 # ==============================================================================
@@ -391,6 +404,7 @@ if __name__ == "__main__":
     t_frota = agora + 20   # Começa em 20s
     t_dash = agora + 60    # Começa em 60s
     t_heart = agora + 5    # Manda sinal de vida logo
+    t_restart = agora + (3 * 60 * 60)
 
     enviar_mensagem_evolution("🚀 *Sistema Iniciado e Logado.*", ADMINS_TECNICOS)
 
@@ -415,6 +429,9 @@ if __name__ == "__main__":
                 tarefa_heartbeat()
                 t_heart = agora + (TEMPO_HEARTBEAT * 60)
                 gc.collect() # Limpa memória RAM
+            if agora >= t_restart:
+                # Passamos o 'driver' para ele poder fechar o navegador antes de sair
+                tarefa_reiniciar_bot(driver, "Manutenção programada")
 
             # --- FECHAMENTO (23:59) ---
             hora = time.localtime()
