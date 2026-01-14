@@ -1,0 +1,35 @@
+# Usa Python leve
+FROM python:3.9-slim
+
+# 1. Instala Firefox e ferramentas do sistema
+RUN apt-get update && apt-get install -y \
+    firefox-esr \
+    wget \
+    curl \
+    unzip \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Instala o Geckodriver (Motor do Firefox)
+RUN GECKODRIVER_VERSION=`curl https://github.com/mozilla/geckodriver/releases/latest | grep -Po 'v[0-9]+.[0-9]+.[0-9]+'` && \
+    wget https://github.com/mozilla/geckodriver/releases/download/$GECKODRIVER_VERSION/geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz && \
+    tar -zxf geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz -C /usr/local/bin && \
+    chmod +x /usr/local/bin/geckodriver && \
+    rm geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz
+
+# 3. Prepara a pasta
+WORKDIR /app
+
+# 4. Instala as bibliotecas do Python
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 5. Copia o código do robô
+COPY . .
+
+# 6. Configurações para rodar sem tela (Headless)
+ENV PYTHONUNBUFFERED=1
+ENV DISPLAY=:99
+
+# 7. Comando de iniciar
+CMD ["python", "mestre_evolution.py"]
