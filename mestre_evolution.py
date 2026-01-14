@@ -43,6 +43,7 @@ MAPA_CONTATOS = {
     "JOAO": "554991777170@s.whatsapp.net"
 }
 
+NOME_GRUPO_AVISOS = "GRUPO_AVISOS"
 LISTA_RELATORIOS = ["DONO", "MATHEUS", "NEIVA"]
 ADMINS_TECNICOS = ["DONO", "JOAO"]
 
@@ -155,7 +156,9 @@ def enviar_mensagem_evolution(mensagem, destinatarios):
         print(f"📤 [API] Enviando para {target_key}...")
         url = f"{EVOLUTION_URL}/message/sendText/{EVOLUTION_INSTANCE}"
         headers = {"apikey": EVOLUTION_APIKEY, "Content-Type": "application/json"}
-        payload = {"number": numero, "text": mensagem}
+        payload = {"number": numero,
+                   "textMessage":{"text": mensagem}
+                     }
         try: requests.post(url, json=payload, headers=headers, timeout=5)
         except: pass
         time.sleep(1)
@@ -189,19 +192,92 @@ def obter_uso_vps():
         return cpu_uso, mem.percent, f"{ram_uso_gb:.1f}GB/{ram_total_gb:.1f}GB"
     except: return 0, 0, "?/?"
 
+def filtrar_dados_offline(texto_bruto):
+    if not texto_bruto: return "🚫 Dados Carregando..."
+    try:
+        # Busca por "Nome:" seguido de qualquer texto até o fim da linha
+        match_nome = re.search(r'Nome:\s*(.+)', texto_bruto)
+        nome = match_nome.group(1).strip() if match_nome else "Motorista"
+        
+        # Busca por "Celular:" (ignorando maiúsculas/minúsculas) e pega números/traços
+        match_cel = re.search(r'Celular:\s*([0-9\(\)\-\s]+)', texto_bruto, re.IGNORECASE)
+        telefone = match_cel.group(1).strip() if match_cel else "Sem nº"
+
+        return f"🚫 {nome} \n📞 {telefone}"
+    except: return f"🚫 Erro Leitura"
+
 # ==============================================================================
 # 🧩 5. TAREFAS DE MONITORAMENTO
 # ==============================================================================
-def tarefa_offline(driver):
-    print("\n🔍 [OFFLINE] Verificando...")
+def tarefa_offline(driver_painel):
+    """
+    Lê do PAINEL via Selenium, manda no ZAP via Evolution API.
+    """
+    print("\n🔍 [OFFLINE] Buscando pinos amarelos...")
+    
     try:
-        if URL_MAPA not in driver.current_url: driver.get(URL_MAPA); time.sleep(5)
-        else: driver.refresh(); time.sleep(8)
-        amarelos = driver.find_elements(By.CSS_SELECTOR, "img[src*='pin-amarelo.png']")
-        qtd = len(amarelos)
-        if qtd >= QTD_CRITICA_OFFLINE:
-            enviar_mensagem_evolution(f"⚠️ *ALERTA REDE:* {qtd} motoristas offline!", "GRUPO_AVISOS")
-    except: pass
+        # --- 1. Navegação no Painel ---
+        if URL_MAPA not in driver_painel.current_url:
+            driver_painel.get(URL_MAPA)
+            time.sleep(5)
+        else:
+            driver_painel.refresh()
+            time.sleep(10)
+
+        # Busca os elementos
+        amarelos = driver_painel.find_elements(By.CSS_SELECTOR, "img[src*='pin-amarelo.png']")
+        qtd_offline = len(amarelos)
+        
+        if qtd_offline == 0:
+            print("✅ [OFFLINE] Rede estável.")
+            return
+
+        # --- 2. Caso Crítico ---
+        if qtd_offline >= QTD_CRITICA_OFFLINE:
+            print(f"⚠️ [CRÍTICO] {qtd_offline} offlines!")
+            mensagem = (
+                f"⚠️ *AVISO DE INSTABILIDADE DE REDE*\n\n"
+                f"O sistema detectou **{qtd_offline} motoristas offline** simultaneamente.\n"
+                f"Possível falha na operadora de telefonia. Recomendamos reiniciar os aparelhos."
+            )
+            enviar_mensagem_evolution(mensagem, NOME_GRUPO_AVISOS)
+            return
+
+        # --- 3. Leitura Individual ---
+        print(f"⚠️ [OFFLINE] {qtd_offline} detectados. Lendo...")
+        lista_final = []
+
+        # Limita a 15 para não travar
+        for pino in amarelos[:15]: 
+            try:
+                driver_painel.execute_script("arguments[0].click();", pino)
+                time.sleep(1.5)
+                
+                try:
+                    balao = driver_painel.find_element(By.CLASS_NAME, "gm-style-iw")
+                    # Usa a função auxiliar criada
+                    lista_final.append(f"🔸 {filtrar_dados_offline(balao.text)}")
+                except: 
+                    lista_final.append("🚫 Erro ao ler balão")
+                
+                try: driver_painel.find_element(By.CLASS_NAME, "gm-ui-hover-effect").click()
+                except: driver_painel.find_element(By.TAG_NAME, 'body').click()
+                time.sleep(0.5)
+            except: 
+                continue
+
+        # --- 4. Envio do Relatório ---
+        if lista_final:
+            texto_zap = "\n".join(lista_final)
+            mensagem = (
+                f"⚠️ *ALERTA: MOTORISTAS OFFLINE - {time.strftime('%H:%M')}*\n"
+                f"📡 Total Sem Sinal: {qtd_offline}\n\n"
+                f"{texto_zap}"
+            )
+            enviar_mensagem_evolution(mensagem, NOME_GRUPO_AVISOS)
+
+    except Exception as e:
+        print(f"❌ Erro Tarefa Offline: {e}")
 
 def tarefa_frota(driver):
     global ultimo_aviso_reforco
@@ -218,8 +294,16 @@ def tarefa_frota(driver):
         if total > 0:
             porc = round((ocupados / total) * 100)
             status = "🟢" if porc <= 40 else "🟡" if porc <= 75 else "🔴 ALTA"
-            msg = f"📊 *STATUS* | {status} {porc}% Ocupados ({ocupados}/{total})"
-            enviar_mensagem_evolution(msg, "GRUPO_AVISOS")
+            msg_stats = (
+            f"📊 *STATUS DA FROTA | {time.strftime('%H:%M')}*\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"{status} - {porc}% de ocupação\n\n"
+            f"🟢 Disponíveis: {livres}\n"
+            f"🔴 Em Atendimento: {ocupados}\n"
+            f"🚗 Total Logado: {total}\n"
+            f"━━━━━━━━━━━━━━━━━━"
+            )
+            enviar_mensagem_evolution(msg_stats, "GRUPO_AVISOS")
             
             agora = time.time()
             if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
@@ -237,10 +321,17 @@ def tarefa_dashboard(driver, enviar=True):
             txt_sol = ler_texto(driver, xp_sol); txt_con = ler_texto(driver, xp_con)
             sol = int(txt_sol.replace('.','')); con = int(txt_con.replace('.',''))
             perdidas = sol - con
+            conversao = round((con / sol) * 100) if sol > 0 else 0
         except: sol, con, perdidas = 0, 0, 0
         
         if enviar:
-            msg = f"📈 *Relatório* | Sol: {sol} | Fim: {con} | Perdidas: {perdidas}"
+            msg = (
+                f"📈 *Relatório de Desempenho - {time.strftime('%H:%M')}*\n"
+                f"📥 Solicitações: {txt_sol}\n"
+                f"✅ Finalizadas: {txt_con}\n"
+                f"🚫 Não Atendidas: {perdidas}\n"
+                f"📊 Taxa de Conversão: {conversao}%"
+            )
             enviar_mensagem_evolution(msg, LISTA_RELATORIOS)
         return sol, con, perdidas
     except: return 0, 0, 0
