@@ -151,16 +151,40 @@ carregar_dados()
 
 def enviar_mensagem_evolution(mensagem, destinatarios):
     if not isinstance(destinatarios, list): destinatarios = [destinatarios]
+    
     for target_key in destinatarios:
+        # Pega o ID do dicionário ou usa o próprio número
         numero = MAPA_CONTATOS.get(target_key, target_key)
-        print(f"📤 [API] Enviando para {target_key}...")
+        
+        print(f"📤 [API] Tentando enviar para {target_key} ({numero})...")
+        
         url = f"{EVOLUTION_URL}/message/sendText/{EVOLUTION_INSTANCE}"
-        headers = {"apikey": EVOLUTION_APIKEY, "Content-Type": "application/json"}
-        payload = {"number": numero,
-                   "textMessage":{"text": mensagem}
-                     }
-        try: requests.post(url, json=payload, headers=headers, timeout=5)
-        except: pass
+        headers = {
+            "apikey": EVOLUTION_APIKEY,
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "number": numero,
+            "text": mensagem,
+            "delay": 1200,
+            "linkPreview": False
+        }
+
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
+            
+            # --- ÁREA DE DIAGNÓSTICO ---
+            if response.status_code == 200 or response.status_code == 201:
+                print(f"✅ [SUCESSO] Mensagem entregue à API.")
+            else:
+                # Aqui vamos ver o motivo do erro!
+                print(f"❌ [ERRO API] Código: {response.status_code}")
+                print(f"📝 [RESPOSTA] {response.text}")
+            # ---------------------------
+
+        except Exception as e:
+            print(f"❌ [ERRO CONEXÃO] O Python não conseguiu chamar a API: {e}")
+            
         time.sleep(1)
 
 # ==============================================================================
