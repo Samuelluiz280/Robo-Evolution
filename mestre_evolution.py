@@ -343,24 +343,39 @@ def tarefa_frota(driver):
     print("\n🚗 [FROTA] Verificando...")
     
     try:
-        # --- NOVO DETECTOR DE QUEDA DE SESSÃO ---
-        # 1. Procura pela imagem 'logoLogin.png' que vimos no diagnóstico
+        # --- DETECTOR DE QUEDA DE SESSÃO ---
         tem_logo_login = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='logoLogin']")) > 0
-        
-        # 2. Procura por campo de senha
         tem_campo_senha = len(driver.find_elements(By.XPATH, "//input[@type='password']")) > 0
-        
-        # 3. Verifica URL
         ta_na_url_login = "login" in driver.current_url.lower()
         
-        # SE QUALQUER UM DESSES FOR VERDADE, A SESSÃO CAIU
-        if tem_logo_login or tem_campo_senha or ta_na_url_login:
-            print(f"⚠️ SESSÃO CAIU! (Logo={tem_logo_login}, Senha={tem_campo_senha})")
-            print("🔄 Forçando reconexão...")
+        # Se cair a sessão ou se a tela estiver "quebrada" (wrapper vazio sem login)
+        tela_quebrada = False
+        try:
+            # Verifica se está numa tela branca travada (título MobFy mas sem login e sem mapa)
+            if "MobFy" in driver.title and not tem_logo_login and URL_MAPA not in driver.current_url:
+                tela_quebrada = True
+        except: pass
+
+        if tem_logo_login or tem_campo_senha or ta_na_url_login or tela_quebrada:
+            print(f"⚠️ SESSÃO CAIU OU TRAVOU! (Logo={tem_logo_login}, TelaQuebrada={tela_quebrada})")
+            print("🧹 Realizando LIMPEZA DE CACHE antes de reconectar...")
             
-            # Força ir para a URL de login para garantir que a função de login rode
-            driver.get(URL_LOGIN)
-            time.sleep(2)
+            try:
+                # 1. Limpa Cookies
+                driver.delete_all_cookies()
+                
+                # 2. Limpa Storage (Memória do navegador)
+                # O script só roda se tiver uma página carregada, então vamos pro login primeiro
+                driver.get(URL_LOGIN)
+                time.sleep(2)
+                driver.execute_script("window.localStorage.clear();")
+                driver.execute_script("window.sessionStorage.clear();")
+                print("✨ Memória do navegador limpa.")
+            except Exception as e:
+                print(f"⚠️ Erro ao limpar cache (não crítico): {e}")
+
+            # 3. Agora sim, carrega a página de login limpa
+            driver.refresh() 
             fazer_login_automatico(driver)
             
             # Depois de logar, vai para o mapa
@@ -368,39 +383,35 @@ def tarefa_frota(driver):
             driver.get(URL_MAPA)
             time.sleep(15)
         
-        # Se não caiu, mas não está na URL do mapa, vai pra lá
         elif URL_MAPA not in driver.current_url:
             driver.get(URL_MAPA)
             time.sleep(15) 
         
-        # --- CONTAGEM ---
-        # Agora que garantimos o login, contamos os carros
+        # --- CONTAGEM (CÓDIGO MANTIDO IGUAL) ---
         livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
-        
         ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho']")) + \
                    len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
         
-        # PLANO B: Se ainda der zero, conta tudo que não for logo/usuário
         if livres == 0 and ocupados == 0:
+             # Plano B: Pinos genéricos (removendo logo e avatar roxo)
              todas_imgs = driver.find_elements(By.CSS_SELECTOR, "img[src*='.png']")
-             # Filtra logoLogin e user-purple
              potenciais_carros = [
                  img for img in todas_imgs 
                  if "logo" not in img.get_attribute("src") 
                  and "purple" not in img.get_attribute("src")
              ]
-             
              if len(potenciais_carros) > 0:
-                 print(f"⚠️ Aviso: Ícones coloridos não achados. Usando {len(potenciais_carros)} ícones genéricos.")
+                 print(f"⚠️ Usando contagem genérica: {len(potenciais_carros)}")
                  ocupados = len(potenciais_carros)
              
         total = livres + ocupados
         print(f"🔢 Contagem Final: Livres={livres} | Ocupados={ocupados} | Total={total}")
         
-        # ... (O resto da lógica de envio continua igual) ...
+        # Lógica de salvar pico
         if total > estatisticas_dia['pico']:
             estatisticas_dia['pico'] = total; estatisticas_dia['hora_pico'] = time.strftime('%H:%M'); salvar_dados()
         
+        # Lógica de Envio
         if total > 0:
             porc = round((ocupados / total) * 100)
             status = "🟢" if porc <= 40 else "🟡" if porc <= 75 else "🔴 ALTA"
