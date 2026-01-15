@@ -340,8 +340,8 @@ def tarefa_frota(driver):
         if total > estatisticas_dia['pico']:
             estatisticas_dia['pico'] = total; estatisticas_dia['hora_pico'] = time.strftime('%H:%M'); salvar_dados()
         
-        if total > 0:
-            porc = round((ocupados / total) * 100)
+        if total >= 0:
+            porc = round((ocupados / total) * 100) if total > 0 else 0
             status = "🟢" if porc <= 40 else "🟡" if porc <= 75 else "🔴 ALTA"
             msg_stats = (
             f"📊 *STATUS DA FROTA | {time.strftime('%H:%M')}*\n"
