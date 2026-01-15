@@ -72,87 +72,75 @@ estatisticas_dia = {'data': time.strftime('%Y-%m-%d'), 'pico': 0, 'hora_pico': "
 # 🔐 2. FUNÇÃO DE LOGIN (ATUALIZADA)
 # ==============================================================================
 def fazer_login_automatico(driver):
-    print("🔑 Iniciando login (Modo: Pagar Primeiro Campo)...")
+    print("🔑 Iniciando login (Modo: Persistente)...")
     try:
+        # Se já estiver logado, sai
         if "dashboard" in driver.current_url and "login" not in driver.current_url:
             print("✅ Sessão anterior ativa.")
             return
 
         driver.get(URL_LOGIN)
-        print("⏳ Aguardando elementos da tela...")
-        time.sleep(10) # 10s para garantir que o Angular carregou
-
-        # --- DIAGNÓSTICO DOS INPUTS (Para sabermos o que tem na tela) ---
-        try:
+        
+        # --- LOOP DE ESPERA (30 SEGUNDOS) ---
+        # Sites em Angular/React demoram para "desenhar" os inputs na tela.
+        # Vamos tentar encontrar os inputs 6 vezes, esperando 5s cada vez.
+        todos_inputs = []
+        for tentativa in range(1, 7):
+            print(f"⏳ Tentativa {tentativa}/6 de encontrar formulário...")
+            time.sleep(5)
             todos_inputs = driver.find_elements(By.TAG_NAME, "input")
-            print(f"🧐 O robô encontrou {len(todos_inputs)} inputs totais.")
-            # Imprime o HTML deles para debug futuro, se precisar
-            for i, inp in enumerate(todos_inputs):
-                try:
-                    tipo = inp.get_attribute("type")
-                    print(f"   [{i}] Tipo: {tipo} | HTML: {inp.get_attribute('outerHTML')[:100]}...")
-                except: pass
-        except: pass
+            if len(todos_inputs) > 0:
+                print(f"✅ Formulário carregado! Encontrados {len(todos_inputs)} campos.")
+                break
+        
+        # Se depois de 30s ainda for 0, imprime o erro
+        if len(todos_inputs) == 0:
+            print("❌ ERRO: A página carregou mas está SEM CAMPOS (Tela Branca/Loading).")
+            print(f"TITULO DA PAGINA: {driver.title}")
+            try:
+                # Imprime um pedaço do HTML para sabermos se é erro do servidor
+                html_body = driver.find_element(By.TAG_NAME, "body").get_attribute("innerHTML")
+                print(f"🔎 CONTEÚDO DA TELA: {html_body[:300]}...") 
+            except: pass
+            return
 
-        # --- ESTRATÉGIA: PEGAR PELO ÍNDICE ---
+        # --- ESTRATÉGIA: PEGAR PELO ÍNDICE (Mantida, pois é boa) ---
         campo_user = None
         campo_senha = None
 
-        # 1. Acha o campo de SENHA (é o mais fácil de identificar)
-        try:
-            campo_senha = driver.find_element(By.CSS_SELECTOR, "input[type='password']")
-        except:
-            print("⚠️ Não achei input type='password'. Tentando input[1] da lista...")
+        # 1. Acha Senha
+        try: campo_senha = driver.find_element(By.CSS_SELECTOR, "input[type='password']")
+        except: 
             if len(todos_inputs) >= 2: campo_senha = todos_inputs[1]
 
-        # 2. Acha o campo de USUÁRIO (Geralmente é o input antes da senha ou o primeiro texto)
-        # Filtra inputs que NÃO são senha, checkbox, radio ou hidden
+        # 2. Acha Usuário (Primeiro input que não é senha/hidden)
         candidatos_user = [
-            i for i in driver.find_elements(By.TAG_NAME, "input")
+            i for i in todos_inputs
             if i.get_attribute("type") not in ['password', 'hidden', 'checkbox', 'radio', 'submit', 'button']
         ]
 
-        if len(candidatos_user) > 0:
-            campo_user = candidatos_user[0] # Pega o primeiro limpo que achar
-        else:
-            print("❌ ERRO: Não achei nenhum campo candidato para usuário!")
-            return
+        if len(candidatos_user) > 0: campo_user = candidatos_user[0]
 
-        # --- PREENCHIMENTO ---
         if campo_user and campo_senha:
-            print("📝 Preenchendo credenciais...")
             try:
-                campo_user.clear()
-                campo_user.send_keys(USUARIO_PAINEL)
-                print("👤 Usuário digitado no primeiro campo visível.")
-                
+                campo_user.clear(); campo_user.send_keys(USUARIO_PAINEL)
+                print("👤 Usuário preenchido.")
                 time.sleep(0.5)
-                
-                campo_senha.clear()
-                campo_senha.send_keys(SENHA_PAINEL)
-                print("🔑 Senha digitada.")
-                
+                campo_senha.clear(); campo_senha.send_keys(SENHA_PAINEL)
+                print("🔑 Senha preenchida.")
                 time.sleep(1)
                 campo_senha.send_keys(Keys.ENTER)
                 print("🖱️ Enter enviado.")
-                
-                # Clica no botão se houver, por garantia
-                try:
-                    driver.find_element(By.TAG_NAME, "button").click()
-                except: pass
-
             except Exception as e:
                 print(f"❌ Erro ao digitar: {e}")
         else:
-            print("❌ Falha: Não identifiquei o par Usuário/Senha.")
+            print("❌ Falha: Inputs existem mas não identifiquei usuário/senha.")
 
-        print("⏳ Aguardando acesso...")
+        print("⏳ Aguardando redirecionamento...")
         time.sleep(15)
         
         if "dashboard" in driver.current_url:
             print("✅ LOGIN REALIZADO COM SUCESSO!")
-        else:
-            print(f"⚠️ Alerta: Ainda estamos em {driver.current_url}")
 
     except Exception as e:
         print(f"❌ Falha crítica no login: {e}")
@@ -230,11 +218,19 @@ def enviar_mensagem_evolution(mensagem, destinatarios):
 # 🛠️ 4. FERRAMENTAS DO SISTEMA
 # ==============================================================================
 def criar_driver_painel():
-    print(f"🦊 Iniciando Firefox...")
+    print(f"🦊 Iniciando Firefox (Modo Full HD)...")
     options = FirefoxOptions()
     if not os.path.exists(CAMINHO_PERFIL_PAINEL): os.makedirs(CAMINHO_PERFIL_PAINEL)
     options.add_argument("-profile"); options.add_argument(CAMINHO_PERFIL_PAINEL)
-    options.add_argument("--headless") # Roda sem interface gráfica (ideal para VPS)
+    options.add_argument("--headless") 
+    
+    # --- NOVO: Configurações para evitar tela branca ---
+    options.add_argument("--window-size=1920,1080") # Tela grande
+    options.add_argument("--width=1920")
+    options.add_argument("--height=1080")
+    # Finge ser um navegador comum para evitar bloqueios
+    options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     servico = Service(GeckoDriverManager().install())
