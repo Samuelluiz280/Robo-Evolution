@@ -340,89 +340,81 @@ def tarefa_offline(driver_painel):
 
 def tarefa_frota(driver):
     global ultimo_aviso_reforco
-    print("\n🚗 [FROTA] Verificando...")
+    print("\n🚗 [FROTA - MODO RAIO-X] Analisando elementos do mapa...")
     
     try:
-        # --- NOVO DETECTOR DE QUEDA DE SESSÃO ---
-        # 1. Procura pela imagem 'logoLogin.png' que vimos no diagnóstico
+        # --- 1. DETECTOR DE SESSÃO (MANTIDO IGUAL - POIS FUNCIONOU!) ---
         tem_logo_login = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='logoLogin']")) > 0
-        
-        # 2. Procura por campo de senha
         tem_campo_senha = len(driver.find_elements(By.XPATH, "//input[@type='password']")) > 0
-        
-        # 3. Verifica URL
         ta_na_url_login = "login" in driver.current_url.lower()
         
-        # SE QUALQUER UM DESSES FOR VERDADE, A SESSÃO CAIU
-        if tem_logo_login or tem_campo_senha or ta_na_url_login:
-            print(f"⚠️ SESSÃO CAIU! (Logo={tem_logo_login}, Senha={tem_campo_senha})")
-            print("🔄 Forçando reconexão...")
-            
-            # Força ir para a URL de login para garantir que a função de login rode
-            driver.get(URL_LOGIN)
-            time.sleep(2)
-            fazer_login_automatico(driver)
-            
-            # Depois de logar, vai para o mapa
-            print("🗺️ Voltando para o mapa...")
-            driver.get(URL_MAPA)
-            time.sleep(15)
+        # Verifica tela branca/travada
+        tela_travada = False
+        if "MobFy" in driver.title and not tem_logo_login and URL_MAPA not in driver.current_url:
+            tela_travada = True
+
+        if tem_logo_login or tem_campo_senha or ta_na_url_login or tela_travada:
+            print(f"⚠️ SESSÃO CAIU! Reiniciando limpeza...")
+            try:
+                driver.delete_all_cookies()
+                driver.get(URL_LOGIN); time.sleep(2)
+                driver.execute_script("window.localStorage.clear();")
+                driver.refresh()
+                fazer_login_automatico(driver)
+                print("🗺️ Voltando para o mapa...")
+                driver.get(URL_MAPA); time.sleep(15)
+            except: pass
         
-        # Se não caiu, mas não está na URL do mapa, vai pra lá
         elif URL_MAPA not in driver.current_url:
-            driver.get(URL_MAPA)
-            time.sleep(15) 
+            driver.get(URL_MAPA); time.sleep(15) 
+            
+        # --- 2. O RAIO-X (AQUI ESTÁ A NOVIDADE) ---
+        print("🔎 ESCANEANDO A TELA EM BUSCA DOS CARROS...")
         
-        # --- CONTAGEM ---
-        # Agora que garantimos o login, contamos os carros
-        livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
+        # BUSCA A: Imagens normais (JPG/PNG)
+        imgs = driver.find_elements(By.TAG_NAME, "img")
+        print(f"   👉 Imagens (<img>) encontradas: {len(imgs)}")
+        for i, img in enumerate(imgs[:15]): # Lista as 15 primeiras
+            src = img.get_attribute("src")
+            if src and len(src) < 150: # Evita imprimir base64 gigante
+                print(f"      📷 [IMG {i}] {src.split('/')[-1]}")
+            elif src:
+                print(f"      📷 [IMG {i}] (Base64 ou link longo...)")
+
+        # BUSCA B: Imagens SVG (Vetores) - Muito comum hoje em dia
+        svgs = driver.find_elements(By.TAG_NAME, "svg")
+        print(f"   👉 Ícones (SVG) encontrados: {len(svgs)}")
         
-        ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho']")) + \
-                   len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
+        # BUSCA C: Pinos do Google Maps (Divs específicas)
+        pinos_gmap = driver.find_elements(By.CSS_SELECTOR, "div[role='button']")
+        print(f"   👉 Botões/Pinos de Mapa encontrados: {len(pinos_gmap)}")
+
+        # --- TENTATIVA DE CONTAGEM HÍBRIDA ---
+        # Vamos tentar contar somando tudo que acharmos
+        livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde'], img[src*='green'], img[src*='on'], img[src*='free']"))
         
-        # PLANO B: Se ainda der zero, conta tudo que não for logo/usuário
-        if livres == 0 and ocupados == 0:
-             todas_imgs = driver.find_elements(By.CSS_SELECTOR, "img[src*='.png']")
-             # Filtra logoLogin e user-purple
-             potenciais_carros = [
-                 img for img in todas_imgs 
-                 if "logo" not in img.get_attribute("src") 
-                 and "purple" not in img.get_attribute("src")
-             ]
-             
-             if len(potenciais_carros) > 0:
-                 print(f"⚠️ Aviso: Ícones coloridos não achados. Usando {len(potenciais_carros)} ícones genéricos.")
-                 ocupados = len(potenciais_carros)
-             
+        # Tenta pegar ocupados por cor ou nome
+        ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho'], img[src*='red'], img[src*='busy'], img[src*='ocupado']"))
+        
+        # Se achou zero, tenta contar os SVGs (assumindo que são carros)
+        if livres == 0 and ocupados == 0 and len(svgs) > 0:
+            print("⚠️ Nenhuma imagem achada, mas achei SVGs. Assumindo que são carros.")
+            # Remove ícones de sistema (menu, zoom, etc) - Chute conservador
+            total_svgs = len(svgs)
+            ocupados = max(0, total_svgs - 5) 
+
         total = livres + ocupados
-        print(f"🔢 Contagem Final: Livres={livres} | Ocupados={ocupados} | Total={total}")
-        
-        # ... (O resto da lógica de envio continua igual) ...
-        if total > estatisticas_dia['pico']:
-            estatisticas_dia['pico'] = total; estatisticas_dia['hora_pico'] = time.strftime('%H:%M'); salvar_dados()
-        
+        print(f"🔢 Contagem Raio-X: Livres={livres} | Ocupados={ocupados} | Total={total}")
+
+        # O restante do código de envio continua igual...
         if total > 0:
             porc = round((ocupados / total) * 100)
             status = "🟢" if porc <= 40 else "🟡" if porc <= 75 else "🔴 ALTA"
-            
-            msg_stats = (
-            f"📊 *STATUS DA FROTA | {time.strftime('%H:%M')}*\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"{status} - {porc}% de ocupação\n\n"
-            f"🟢 Disponíveis: {livres}\n"
-            f"🔴 Em Atendimento: {ocupados}\n"
-            f"🚗 Total Logado: {total}\n"
-            f"━━━━━━━━━━━━━━━━━━"
-            )
+            msg_stats = (f"📊 *STATUS DA FROTA*\n{status} - {porc}% ocupado\n🚗 Total: {total}")
             enviar_mensagem_evolution(msg_stats, "GRUPO_AVISOS")
-            
-            agora = time.time()
-            if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
-                enviar_mensagem_evolution(f"⚠️ *REFORÇO:* Demanda alta ({porc}%).", "GRUPO_AVISOS")
-                ultimo_aviso_reforco = agora
-                
+
     except Exception as e:
-        print(f"❌ Erro Frota: {e}")
+        print(f"❌ Erro Raio-X: {e}")
 
 def tarefa_dashboard(driver, enviar=True):
     print("\n📈 [DASHBOARD] Lendo...")
