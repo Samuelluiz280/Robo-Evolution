@@ -37,7 +37,7 @@ EVOLUTION_APIKEY = "DEV280@NEXT"
 
 # --- 👥 CONTATOS (IDs) ---
 MAPA_CONTATOS = {
-    "GRUPO_AVISOS": "554991777170@s.whatsapp.net",
+    "GRUPO_AVISOS": "120363421503531873@g.us",
     "DONO": "553899003357@s.whatsapp.net",
     "MATHEUS": "554989000629@s.whatsapp.net",
     "NEIVA": "554989032654@s.whatsapp.net",
