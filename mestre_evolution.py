@@ -71,99 +71,88 @@ estatisticas_dia = {'data': time.strftime('%Y-%m-%d'), 'pico': 0, 'hora_pico': "
 # ==============================================================================
 # 🔐 2. FUNÇÃO DE LOGIN (ATUALIZADA)
 # ==============================================================================
-# ==============================================================================
-# 🔐 2. FUNÇÃO DE LOGIN (BLINDADA)
-# ==============================================================================
 def fazer_login_automatico(driver):
-    print("🔑 Iniciando processo de login (Modo Robusto)...")
+    print("🔑 Iniciando login (Modo: Pagar Primeiro Campo)...")
     try:
-        # Se já estiver logado (e não for falso positivo), sai
         if "dashboard" in driver.current_url and "login" not in driver.current_url:
             print("✅ Sessão anterior ativa.")
             return
 
         driver.get(URL_LOGIN)
-        print("⏳ Aguardando formulário carregar...")
-        time.sleep(8) # Tempo extra para garantir
+        print("⏳ Aguardando elementos da tela...")
+        time.sleep(10) # 10s para garantir que o Angular carregou
 
-        # --- 1. PREENCHER USUÁRIO ---
-        campo_user = None
-        # Tenta estratégia A: Pelo tipo email
-        try: campo_user = driver.find_element(By.CSS_SELECTOR, "input[type='email']")
+        # --- DIAGNÓSTICO DOS INPUTS (Para sabermos o que tem na tela) ---
+        try:
+            todos_inputs = driver.find_elements(By.TAG_NAME, "input")
+            print(f"🧐 O robô encontrou {len(todos_inputs)} inputs totais.")
+            # Imprime o HTML deles para debug futuro, se precisar
+            for i, inp in enumerate(todos_inputs):
+                try:
+                    tipo = inp.get_attribute("type")
+                    print(f"   [{i}] Tipo: {tipo} | HTML: {inp.get_attribute('outerHTML')[:100]}...")
+                except: pass
         except: pass
-        
-        # Tenta estratégia B: Pelo placeholder (texto dentro da caixa)
-        if not campo_user:
-            try: campo_user = driver.find_element(By.CSS_SELECTOR, "input[placeholder*='mail']")
-            except: pass
-            
-        # Tenta estratégia C: Pelo nome
-        if not campo_user:
-            try: campo_user = driver.find_element(By.NAME, "email")
-            except: pass
 
-        # Tenta estratégia D: Pelo XPath antigo (último recurso)
-        if not campo_user:
-             try: campo_user = driver.find_element(By.XPATH, "/html/body/div/app/body/div/div[2]/form/div[1]/input")
-             except: pass
+        # --- ESTRATÉGIA: PEGAR PELO ÍNDICE ---
+        campo_user = None
+        campo_senha = None
 
-        if campo_user:
-            campo_user.clear()
-            campo_user.send_keys(USUARIO_PAINEL)
-            print("👤 Usuário preenchido.")
-        else:
-            print("❌ ERRO CRÍTICO: Não achei o campo de usuário!")
-            return
-
-        # --- 2. PREENCHER SENHA ---
+        # 1. Acha o campo de SENHA (é o mais fácil de identificar)
         try:
-            # Senha é mais fácil: quase sempre é input type='password'
             campo_senha = driver.find_element(By.CSS_SELECTOR, "input[type='password']")
-            campo_senha.clear()
-            campo_senha.send_keys(SENHA_PAINEL)
-            print("🔑 Senha preenchida.")
         except:
-            print("❌ Erro ao achar campo de senha.")
-            return
-        
-        time.sleep(1) 
+            print("⚠️ Não achei input type='password'. Tentando input[1] da lista...")
+            if len(todos_inputs) >= 2: campo_senha = todos_inputs[1]
 
-        # --- 3. CLICAR NO BOTÃO ---
-        try:
-            # Tenta achar o botão de várias formas
-            botoes = driver.find_elements(By.TAG_NAME, "button")
-            botao_entrar = None
-            
-            # Procura botão com texto "Entrar" ou "Login"
-            for btn in botoes:
-                if "entrar" in btn.text.lower() or "login" in btn.text.lower():
-                    botao_entrar = btn
-                    break
-            
-            # Se não achar por texto, pega o input submit
-            if not botao_entrar:
-                try: botao_entrar = driver.find_element(By.CSS_SELECTOR, "input[type='submit']")
+        # 2. Acha o campo de USUÁRIO (Geralmente é o input antes da senha ou o primeiro texto)
+        # Filtra inputs que NÃO são senha, checkbox, radio ou hidden
+        candidatos_user = [
+            i for i in driver.find_elements(By.TAG_NAME, "input")
+            if i.get_attribute("type") not in ['password', 'hidden', 'checkbox', 'radio', 'submit', 'button']
+        ]
+
+        if len(candidatos_user) > 0:
+            campo_user = candidatos_user[0] # Pega o primeiro limpo que achar
+        else:
+            print("❌ ERRO: Não achei nenhum campo candidato para usuário!")
+            return
+
+        # --- PREENCHIMENTO ---
+        if campo_user and campo_senha:
+            print("📝 Preenchendo credenciais...")
+            try:
+                campo_user.clear()
+                campo_user.send_keys(USUARIO_PAINEL)
+                print("👤 Usuário digitado no primeiro campo visível.")
+                
+                time.sleep(0.5)
+                
+                campo_senha.clear()
+                campo_senha.send_keys(SENHA_PAINEL)
+                print("🔑 Senha digitada.")
+                
+                time.sleep(1)
+                campo_senha.send_keys(Keys.ENTER)
+                print("🖱️ Enter enviado.")
+                
+                # Clica no botão se houver, por garantia
+                try:
+                    driver.find_element(By.TAG_NAME, "button").click()
                 except: pass
 
-            if botao_entrar:
-                botao_entrar.click()
-                print("🖱️ Clicou no botão.")
-            else:
-                # Se não achar botão, dá Enter na senha
-                print("⚠️ Botão não achado, tentando ENTER...")
-                campo_senha.send_keys(Keys.ENTER)
-                
-        except Exception as e:
-            print(f"❌ Erro no clique: {e}")
-            campo_senha.send_keys(Keys.ENTER)
-        
-        print("⏳ Aguardando redirecionamento...")
-        time.sleep(10)
+            except Exception as e:
+                print(f"❌ Erro ao digitar: {e}")
+        else:
+            print("❌ Falha: Não identifiquei o par Usuário/Senha.")
+
+        print("⏳ Aguardando acesso...")
+        time.sleep(15)
         
         if "dashboard" in driver.current_url:
             print("✅ LOGIN REALIZADO COM SUCESSO!")
         else:
-            print(f"⚠️ Alerta pós-login: URL atual é {driver.current_url}")
+            print(f"⚠️ Alerta: Ainda estamos em {driver.current_url}")
 
     except Exception as e:
         print(f"❌ Falha crítica no login: {e}")
