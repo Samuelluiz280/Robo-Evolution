@@ -339,82 +339,49 @@ def tarefa_offline(driver_painel):
         print(f"❌ Erro Tarefa Offline: {e}")
 
 def tarefa_frota(driver):
-    global ultimo_aviso_reforco
-    print("\n🚗 [FROTA - MODO RAIO-X] Analisando elementos do mapa...")
+    print("\n🚗 [FROTA - MODO DESCOBERTA] Mapeando botões do painel...")
     
     try:
-        # --- 1. DETECTOR DE SESSÃO (MANTIDO IGUAL - POIS FUNCIONOU!) ---
-        tem_logo_login = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='logoLogin']")) > 0
-        tem_campo_senha = len(driver.find_elements(By.XPATH, "//input[@type='password']")) > 0
-        ta_na_url_login = "login" in driver.current_url.lower()
+        # 1. Garante que estamos no DASHBOARD (que é onde o login nos deixa)
+        if "dashboard" not in driver.current_url:
+            print("🔄 Voltando para o Dashboard inicial...")
+            driver.get(URL_DASHBOARD)
+            time.sleep(10)
         
-        # Verifica tela branca/travada
-        tela_travada = False
-        if "MobFy" in driver.title and not tem_logo_login and URL_MAPA not in driver.current_url:
-            tela_travada = True
+        # 2. Vamos listar TUDO que é clicável na tela para achar o botão do Mapa
+        print("\n🔎 LISTANDO LINKS E BOTÕES DA TELA:")
+        print("="*60)
+        
+        # Busca links (tags <a>)
+        links = driver.find_elements(By.TAG_NAME, "a")
+        for i, link in enumerate(links):
+            texto = link.text.strip()
+            href = link.get_attribute("href")
+            # Só mostra se tiver texto ou link relevante
+            if texto or (href and "java" not in href):
+                print(f"🔗 [LINK {i}] Texto: '{texto}' | Destino: {href}")
 
-        if tem_logo_login or tem_campo_senha or ta_na_url_login or tela_travada:
-            print(f"⚠️ SESSÃO CAIU! Reiniciando limpeza...")
-            try:
-                driver.delete_all_cookies()
-                driver.get(URL_LOGIN); time.sleep(2)
-                driver.execute_script("window.localStorage.clear();")
-                driver.refresh()
-                fazer_login_automatico(driver)
-                print("🗺️ Voltando para o mapa...")
-                driver.get(URL_MAPA); time.sleep(15)
-            except: pass
-        
-        elif URL_MAPA not in driver.current_url:
-            driver.get(URL_MAPA); time.sleep(15) 
-            
-        # --- 2. O RAIO-X (AQUI ESTÁ A NOVIDADE) ---
-        print("🔎 ESCANEANDO A TELA EM BUSCA DOS CARROS...")
-        
-        # BUSCA A: Imagens normais (JPG/PNG)
-        imgs = driver.find_elements(By.TAG_NAME, "img")
-        print(f"   👉 Imagens (<img>) encontradas: {len(imgs)}")
-        for i, img in enumerate(imgs[:15]): # Lista as 15 primeiras
-            src = img.get_attribute("src")
-            if src and len(src) < 150: # Evita imprimir base64 gigante
-                print(f"      📷 [IMG {i}] {src.split('/')[-1]}")
-            elif src:
-                print(f"      📷 [IMG {i}] (Base64 ou link longo...)")
+        # Busca botões (tags <button> ou inputs submit)
+        botoes = driver.find_elements(By.TAG_NAME, "button")
+        for i, btn in enumerate(botoes):
+            print(f"🔘 [BOTÃO {i}] Texto: '{btn.text.strip()}'")
 
-        # BUSCA B: Imagens SVG (Vetores) - Muito comum hoje em dia
-        svgs = driver.find_elements(By.TAG_NAME, "svg")
-        print(f"   👉 Ícones (SVG) encontrados: {len(svgs)}")
-        
-        # BUSCA C: Pinos do Google Maps (Divs específicas)
-        pinos_gmap = driver.find_elements(By.CSS_SELECTOR, "div[role='button']")
-        print(f"   👉 Botões/Pinos de Mapa encontrados: {len(pinos_gmap)}")
+        # Busca itens de menu (tags <li> ou <span> com texto)
+        spans = driver.find_elements(By.CSS_SELECTOR, "span, div, li")
+        for el in spans:
+            txt = el.text.strip()
+            # Filtra palavras chave que podem ser o mapa
+            if txt and txt.lower() in ["mapa", "map", "monitoramento", "frota", "rastreamento", "ao vivo", "ver mapa"]:
+                print(f"✨ [CANDIDATO] Elemento com texto: '{txt}' | Tag: {el.tag_name}")
 
-        # --- TENTATIVA DE CONTAGEM HÍBRIDA ---
-        # Vamos tentar contar somando tudo que acharmos
-        livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde'], img[src*='green'], img[src*='on'], img[src*='free']"))
+        print("="*60)
+        print("⚠️ AGUARDANDO: Me mande o print do log acima para escolhermos onde clicar!")
         
-        # Tenta pegar ocupados por cor ou nome
-        ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho'], img[src*='red'], img[src*='busy'], img[src*='ocupado']"))
-        
-        # Se achou zero, tenta contar os SVGs (assumindo que são carros)
-        if livres == 0 and ocupados == 0 and len(svgs) > 0:
-            print("⚠️ Nenhuma imagem achada, mas achei SVGs. Assumindo que são carros.")
-            # Remove ícones de sistema (menu, zoom, etc) - Chute conservador
-            total_svgs = len(svgs)
-            ocupados = max(0, total_svgs - 5) 
-
-        total = livres + ocupados
-        print(f"🔢 Contagem Raio-X: Livres={livres} | Ocupados={ocupados} | Total={total}")
-
-        # O restante do código de envio continua igual...
-        if total > 0:
-            porc = round((ocupados / total) * 100)
-            status = "🟢" if porc <= 40 else "🟡" if porc <= 75 else "🔴 ALTA"
-            msg_stats = (f"📊 *STATUS DA FROTA*\n{status} - {porc}% ocupado\n🚗 Total: {total}")
-            enviar_mensagem_evolution(msg_stats, "GRUPO_AVISOS")
+        # Pausa para não ficar floodando
+        time.sleep(30)
 
     except Exception as e:
-        print(f"❌ Erro Raio-X: {e}")
+        print(f"❌ Erro Descoberta: {e}")
 
 def tarefa_dashboard(driver, enviar=True):
     print("\n📈 [DASHBOARD] Lendo...")
