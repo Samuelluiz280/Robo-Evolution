@@ -413,45 +413,44 @@ def tarefa_frota(driver):
     print("\n🚗 [FROTA] Iniciando navegação...")
     
     try:
-        # --- 1. VERIFICAÇÃO DE SEGURANÇA (Login/Sessão) ---
-        # Se estiver na tela de login, reinicia para limpar memória (Estratégia Nuclear)
-        if len(driver.find_elements(By.CSS_SELECTOR, "img[src*='logoLogin']")) > 0:
-            print("⚠️ Sessão caiu (Logo detectada). Reiniciando container...")
+        # --- 1. VERIFICAÇÃO DE SEGURANÇA (AJUSTADA) ---
+        # Só reinicia se tiver LOGO + CAMPO DE SENHA (Sinal que deslogou de verdade)
+        tem_logo = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='logoLogin']")) > 0
+        tem_senha = len(driver.find_elements(By.CSS_SELECTOR, "input[type='password']")) > 0
+        
+        if tem_logo and tem_senha:
+            print("⚠️ Sessão caiu REALMENTE (Login detectado). Reiniciando container...")
             driver.quit(); sys.exit(0)
 
         # --- 2. NAVEGAÇÃO HUMANA (CLICAR NO BOTÃO) ---
-        # Se NÃO estamos no mapa, precisamos ir pra lá clicando
+        # O log de descoberta mostrou que o link se chama 'Ver Mapa'
         if "vermapa" not in driver.current_url:
             print("🔄 Indo para o Dashboard para achar o botão...")
             if "dashboard" not in driver.current_url:
                 driver.get(URL_DASHBOARD)
-                time.sleep(8)
+                time.sleep(5)
             
-            print("🔎 Procurando botão 'Ver Mapa'...")
+            print("🔎 Clicando em 'Ver Mapa'...")
             try:
-                # Tenta clicar pelo texto do link (Método mais preciso)
-                botao_mapa = driver.find_element(By.PARTIAL_LINK_TEXT, "Ver Mapa")
-                botao_mapa.click()
-                print("🖱️ CLIQUEI no botão 'Ver Mapa'!")
-                time.sleep(15) # Espera o mapa carregar
+                # Clica no link descoberto no log anterior
+                driver.find_element(By.PARTIAL_LINK_TEXT, "Ver Mapa").click()
+                print("🖱️ Clique realizado! Aguardando mapa...")
+                time.sleep(15) 
             except:
-                print("⚠️ Botão não achado pelo texto. Tentando forçar URL...")
-                driver.get(URL_MAPA) # Último recurso
+                print("⚠️ Clique falhou. Tentando URL direta...")
+                driver.get(URL_MAPA)
                 time.sleep(15)
-        
+
         # --- 3. CONTAGEM DOS CARROS ---
         print("👀 Contando veículos na tela...")
         
-        # Busca imagens de carros (Verde = Livre, Vermelho/Ocupado = Ocupado)
         livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
         ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho']")) + \
                    len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
         
-        # PLANO B: Se a contagem der 0 (ícones mudaram de nome?), conta genéricos
+        # PLANO B: Contagem Genérica (Se ícones mudaram)
         if livres == 0 and ocupados == 0:
-             # Pega todas as imagens PNG
              todas_imgs = driver.find_elements(By.CSS_SELECTOR, "img[src*='.png']")
-             # Remove o que sabemos que NÃO é carro (logo, avatar, etc)
              potenciais_carros = [
                  img for img in todas_imgs 
                  if "logo" not in img.get_attribute("src") 
@@ -460,14 +459,13 @@ def tarefa_frota(driver):
              ]
              
              if len(potenciais_carros) > 0:
-                 print(f"⚠️ Ícones padrão não achados. Usando {len(potenciais_carros)} ícones genéricos.")
-                 # Chute conservador: divide meio a meio se não souber a cor
+                 print(f"⚠️ Contagem por ícones genéricos: {len(potenciais_carros)}")
                  ocupados = len(potenciais_carros) 
              
         total = livres + ocupados
         print(f"🔢 Contagem Final: Livres={livres} | Ocupados={ocupados} | Total={total}")
         
-        # --- 4. RELATÓRIOS E ENVIO ---
+        # --- 4. RELATÓRIOS ---
         if total > estatisticas_dia['pico']:
             estatisticas_dia['pico'] = total; estatisticas_dia['hora_pico'] = time.strftime('%H:%M'); salvar_dados()
         
@@ -484,16 +482,14 @@ def tarefa_frota(driver):
             f"🚗 Total Logado: {total}\n"
             f"━━━━━━━━━━━━━━━━━━"
             )
-            # Envia para o grupo
             enviar_mensagem_evolution(msg_stats, "GRUPO_AVISOS")
             
-            # Lógica de Reforço (Alerta de Alta Demanda)
             agora = time.time()
             if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
                 enviar_mensagem_evolution(f"⚠️ *REFORÇO:* Demanda alta ({porc}%).", "GRUPO_AVISOS")
                 ultimo_aviso_reforco = agora
                 
-    except SystemExit: raise # Respeita o reinício nuclear
+    except SystemExit: raise 
     except Exception as e:
         print(f"❌ Erro Frota: {e}")
         
