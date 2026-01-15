@@ -332,7 +332,7 @@ def tarefa_frota(driver):
     global ultimo_aviso_reforco
     print("\n🚗 [FROTA] Verificando...")
     try:
-        if URL_MAPA not in driver.current_url: driver.get(URL_MAPA); time.sleep(6)
+        if URL_MAPA not in driver.current_url: driver.get(URL_MAPA); time.sleep(15)
         livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
         ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho']")) + \
                    len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
