@@ -338,51 +338,165 @@ def tarefa_offline(driver_painel):
     except Exception as e:
         print(f"❌ Erro Tarefa Offline: {e}")
 
-def tarefa_frota(driver):
-    print("\n🚗 [FROTA - MODO DESCOBERTA] Mapeando botões do painel...")
+def tarefa_offline(driver_painel):
+    """
+    Lê do PAINEL via Selenium, manda no ZAP via Evolution API.
+    """
+    print("\n🔍 [OFFLINE] Buscando pinos amarelos...")
     
     try:
-        # 1. Garante que estamos no DASHBOARD (que é onde o login nos deixa)
-        if "dashboard" not in driver.current_url:
-            print("🔄 Voltando para o Dashboard inicial...")
-            driver.get(URL_DASHBOARD)
+        # --- 1. Navegação no Painel ---
+        if URL_MAPA not in driver_painel.current_url:
+            driver_painel.get(URL_MAPA)
+            time.sleep(5)
+        else:
+            driver_painel.refresh()
             time.sleep(10)
-        
-        # 2. Vamos listar TUDO que é clicável na tela para achar o botão do Mapa
-        print("\n🔎 LISTANDO LINKS E BOTÕES DA TELA:")
-        print("="*60)
-        
-        # Busca links (tags <a>)
-        links = driver.find_elements(By.TAG_NAME, "a")
-        for i, link in enumerate(links):
-            texto = link.text.strip()
-            href = link.get_attribute("href")
-            # Só mostra se tiver texto ou link relevante
-            if texto or (href and "java" not in href):
-                print(f"🔗 [LINK {i}] Texto: '{texto}' | Destino: {href}")
 
-        # Busca botões (tags <button> ou inputs submit)
-        botoes = driver.find_elements(By.TAG_NAME, "button")
-        for i, btn in enumerate(botoes):
-            print(f"🔘 [BOTÃO {i}] Texto: '{btn.text.strip()}'")
-
-        # Busca itens de menu (tags <li> ou <span> com texto)
-        spans = driver.find_elements(By.CSS_SELECTOR, "span, div, li")
-        for el in spans:
-            txt = el.text.strip()
-            # Filtra palavras chave que podem ser o mapa
-            if txt and txt.lower() in ["mapa", "map", "monitoramento", "frota", "rastreamento", "ao vivo", "ver mapa"]:
-                print(f"✨ [CANDIDATO] Elemento com texto: '{txt}' | Tag: {el.tag_name}")
-
-        print("="*60)
-        print("⚠️ AGUARDANDO: Me mande o print do log acima para escolhermos onde clicar!")
+        # Busca os elementos
+        amarelos = driver_painel.find_elements(By.CSS_SELECTOR, "img[src*='pin-amarelo.png']")
+        qtd_offline = len(amarelos)
         
-        # Pausa para não ficar floodando
-        time.sleep(30)
+        if qtd_offline == 0:
+            print("✅ [OFFLINE] Rede estável.")
+            return
+
+        # --- 2. Caso Crítico ---
+        if qtd_offline >= QTD_CRITICA_OFFLINE:
+            print(f"⚠️ [CRÍTICO] {qtd_offline} offlines!")
+            mensagem = (
+                f"⚠️ *AVISO DE INSTABILIDADE DE REDE*\n\n"
+                f"O sistema detectou **{qtd_offline} motoristas offline** simultaneamente.\n"
+                f"Possível falha na operadora de telefonia. Recomendamos reiniciar os aparelhos."
+            )
+            enviar_mensagem_evolution(mensagem, NOME_GRUPO_AVISOS)
+            return
+
+        # --- 3. Leitura Individual ---
+        print(f"⚠️ [OFFLINE] {qtd_offline} detectados. Lendo...")
+        lista_final = []
+
+        # Limita a 15 para não travar
+        for pino in amarelos[:15]: 
+            try:
+                driver_painel.execute_script("arguments[0].click();", pino)
+                time.sleep(1.5)
+                
+                try:
+                    balao = driver_painel.find_element(By.CLASS_NAME, "gm-style-iw")
+                    # Usa a função auxiliar criada
+                    lista_final.append(f"🔸 {filtrar_dados_offline(balao.text)}")
+                except: 
+                    lista_final.append("🚫 Erro ao ler balão")
+                
+                try: driver_painel.find_element(By.CLASS_NAME, "gm-ui-hover-effect").click()
+                except: driver_painel.find_element(By.TAG_NAME, 'body').click()
+                time.sleep(0.5)
+            except: 
+                continue
+
+        # --- 4. Envio do Relatório ---
+        if lista_final:
+            texto_zap = "\n".join(lista_final)
+            mensagem = (
+                f"⚠️ *ALERTA: MOTORISTAS OFFLINE - {time.strftime('%H:%M')}*\n"
+                f"📡 Total Sem Sinal: {qtd_offline}\n\n"
+                f"{texto_zap}"
+            )
+            enviar_mensagem_evolution(mensagem, NOME_GRUPO_AVISOS)
 
     except Exception as e:
-        print(f"❌ Erro Descoberta: {e}")
+        print(f"❌ Erro Tarefa Offline: {e}")
+        
+def tarefa_frota(driver):
+    global ultimo_aviso_reforco
+    print("\n🚗 [FROTA] Iniciando navegação...")
+    
+    try:
+        # --- 1. VERIFICAÇÃO DE SEGURANÇA (Login/Sessão) ---
+        # Se estiver na tela de login, reinicia para limpar memória (Estratégia Nuclear)
+        if len(driver.find_elements(By.CSS_SELECTOR, "img[src*='logoLogin']")) > 0:
+            print("⚠️ Sessão caiu (Logo detectada). Reiniciando container...")
+            driver.quit(); sys.exit(0)
 
+        # --- 2. NAVEGAÇÃO HUMANA (CLICAR NO BOTÃO) ---
+        # Se NÃO estamos no mapa, precisamos ir pra lá clicando
+        if "vermapa" not in driver.current_url:
+            print("🔄 Indo para o Dashboard para achar o botão...")
+            if "dashboard" not in driver.current_url:
+                driver.get(URL_DASHBOARD)
+                time.sleep(8)
+            
+            print("🔎 Procurando botão 'Ver Mapa'...")
+            try:
+                # Tenta clicar pelo texto do link (Método mais preciso)
+                botao_mapa = driver.find_element(By.PARTIAL_LINK_TEXT, "Ver Mapa")
+                botao_mapa.click()
+                print("🖱️ CLIQUEI no botão 'Ver Mapa'!")
+                time.sleep(15) # Espera o mapa carregar
+            except:
+                print("⚠️ Botão não achado pelo texto. Tentando forçar URL...")
+                driver.get(URL_MAPA) # Último recurso
+                time.sleep(15)
+        
+        # --- 3. CONTAGEM DOS CARROS ---
+        print("👀 Contando veículos na tela...")
+        
+        # Busca imagens de carros (Verde = Livre, Vermelho/Ocupado = Ocupado)
+        livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
+        ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho']")) + \
+                   len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
+        
+        # PLANO B: Se a contagem der 0 (ícones mudaram de nome?), conta genéricos
+        if livres == 0 and ocupados == 0:
+             # Pega todas as imagens PNG
+             todas_imgs = driver.find_elements(By.CSS_SELECTOR, "img[src*='.png']")
+             # Remove o que sabemos que NÃO é carro (logo, avatar, etc)
+             potenciais_carros = [
+                 img for img in todas_imgs 
+                 if "logo" not in img.get_attribute("src") 
+                 and "purple" not in img.get_attribute("src")
+                 and "user" not in img.get_attribute("src")
+             ]
+             
+             if len(potenciais_carros) > 0:
+                 print(f"⚠️ Ícones padrão não achados. Usando {len(potenciais_carros)} ícones genéricos.")
+                 # Chute conservador: divide meio a meio se não souber a cor
+                 ocupados = len(potenciais_carros) 
+             
+        total = livres + ocupados
+        print(f"🔢 Contagem Final: Livres={livres} | Ocupados={ocupados} | Total={total}")
+        
+        # --- 4. RELATÓRIOS E ENVIO ---
+        if total > estatisticas_dia['pico']:
+            estatisticas_dia['pico'] = total; estatisticas_dia['hora_pico'] = time.strftime('%H:%M'); salvar_dados()
+        
+        if total > 0:
+            porc = round((ocupados / total) * 100)
+            status = "🟢" if porc <= 40 else "🟡" if porc <= 75 else "🔴 ALTA"
+            
+            msg_stats = (
+            f"📊 *STATUS DA FROTA | {time.strftime('%H:%M')}*\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"{status} - {porc}% de ocupação\n\n"
+            f"🟢 Disponíveis: {livres}\n"
+            f"🔴 Em Atendimento: {ocupados}\n"
+            f"🚗 Total Logado: {total}\n"
+            f"━━━━━━━━━━━━━━━━━━"
+            )
+            # Envia para o grupo
+            enviar_mensagem_evolution(msg_stats, "GRUPO_AVISOS")
+            
+            # Lógica de Reforço (Alerta de Alta Demanda)
+            agora = time.time()
+            if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
+                enviar_mensagem_evolution(f"⚠️ *REFORÇO:* Demanda alta ({porc}%).", "GRUPO_AVISOS")
+                ultimo_aviso_reforco = agora
+                
+    except SystemExit: raise # Respeita o reinício nuclear
+    except Exception as e:
+        print(f"❌ Erro Frota: {e}")
+        
 def tarefa_dashboard(driver, enviar=True):
     print("\n📈 [DASHBOARD] Lendo...")
     try:
