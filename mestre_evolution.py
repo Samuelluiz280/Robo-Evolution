@@ -9,7 +9,6 @@ import sys
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-# Keys ainda é útil para limpar campos, mesmo clicando no botão depois
 from selenium.webdriver.common.keys import Keys 
 from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
@@ -21,19 +20,17 @@ from webdriver_manager.firefox import GeckoDriverManager
 
 # --- URLS ---
 URL_DASHBOARD = "https://paineladmin3.azurewebsites.net/mobfy/dashboard"
-URL_LOGIN = "https://paineladmin3.azurewebsites.net/mobfy/login" # URL base para logar
+URL_LOGIN = "https://paineladmin3.azurewebsites.net/mobfy/login" 
 URL_MAPA = "https://paineladmin3.azurewebsites.net/mobfy/vermapa"
 
-# --- CREDENCIAIS (Variáveis de Ambiente do EasyPanel) ---
-# Configure "PAINEL_USER" e "PAINEL_PASS" no EasyPanel. 
-# Os valores abaixo são apenas fallback para teste local.
+# --- CREDENCIAIS ---
 USUARIO_PAINEL = os.getenv("PAINEL_USER", "admin@teste.com") 
 SENHA_PAINEL = os.getenv("PAINEL_PASS", "123456")
 
 # --- EVOLUTION API ---
-EVOLUTION_URL = "https://n8n-evolution-teste.laalxr.easypanel.host/"      
+EVOLUTION_URL = "https://n8n-evolution-teste.laalxr.easypanel.host"
 EVOLUTION_INSTANCE = "Evoteste"        
-EVOLUTION_APIKEY = "DEV280@NEXT"           
+EVOLUTION_APIKEY = "DEV280@NEXT"          
 
 # --- 👥 CONTATOS (IDs) ---
 MAPA_CONTATOS = {
@@ -69,21 +66,18 @@ ultimo_aviso_reforco = 0
 estatisticas_dia = {'data': time.strftime('%Y-%m-%d'), 'pico': 0, 'hora_pico': "", 'fechamento_enviado': False}
 
 # ==============================================================================
-# 🔐 2. FUNÇÃO DE LOGIN (ATUALIZADA)
+# 🔐 2. FUNÇÃO DE LOGIN E PREPARAÇÃO DE ABAS
 # ==============================================================================
 def fazer_login_automatico(driver):
     print("🔑 Iniciando login (Modo: Persistente)...")
     try:
-        # Se já estiver logado, sai
         if "dashboard" in driver.current_url and "login" not in driver.current_url:
             print("✅ Sessão anterior ativa.")
             return
 
         driver.get(URL_LOGIN)
         
-        # --- LOOP DE ESPERA (30 SEGUNDOS) ---
-        # Sites em Angular/React demoram para "desenhar" os inputs na tela.
-        # Vamos tentar encontrar os inputs 6 vezes, esperando 5s cada vez.
+        # Loop de espera para o formulário aparecer
         todos_inputs = []
         for tentativa in range(1, 7):
             print(f"⏳ Tentativa {tentativa}/6 de encontrar formulário...")
@@ -93,49 +87,32 @@ def fazer_login_automatico(driver):
                 print(f"✅ Formulário carregado! Encontrados {len(todos_inputs)} campos.")
                 break
         
-        # Se depois de 30s ainda for 0, imprime o erro
         if len(todos_inputs) == 0:
-            print("❌ ERRO: A página carregou mas está SEM CAMPOS (Tela Branca/Loading).")
-            print(f"TITULO DA PAGINA: {driver.title}")
-            try:
-                # Imprime um pedaço do HTML para sabermos se é erro do servidor
-                html_body = driver.find_element(By.TAG_NAME, "body").get_attribute("innerHTML")
-                print(f"🔎 CONTEÚDO DA TELA: {html_body[:300]}...") 
-            except: pass
+            print("❌ ERRO: Tela branca ou loading eterno.")
             return
 
-        # --- ESTRATÉGIA: PEGAR PELO ÍNDICE (Mantida, pois é boa) ---
+        # Estratégia de preenchimento
         campo_user = None
         campo_senha = None
 
-        # 1. Acha Senha
         try: campo_senha = driver.find_element(By.CSS_SELECTOR, "input[type='password']")
         except: 
             if len(todos_inputs) >= 2: campo_senha = todos_inputs[1]
 
-        # 2. Acha Usuário (Primeiro input que não é senha/hidden)
-        candidatos_user = [
-            i for i in todos_inputs
-            if i.get_attribute("type") not in ['password', 'hidden', 'checkbox', 'radio', 'submit', 'button']
-        ]
-
+        candidatos_user = [i for i in todos_inputs if i.get_attribute("type") not in ['password', 'hidden', 'submit']]
         if len(candidatos_user) > 0: campo_user = candidatos_user[0]
 
         if campo_user and campo_senha:
             try:
                 campo_user.clear(); campo_user.send_keys(USUARIO_PAINEL)
-                print("👤 Usuário preenchido.")
                 time.sleep(0.5)
                 campo_senha.clear(); campo_senha.send_keys(SENHA_PAINEL)
-                print("🔑 Senha preenchida.")
                 time.sleep(1)
                 campo_senha.send_keys(Keys.ENTER)
-                print("🖱️ Enter enviado.")
+                print("🖱️ Credenciais enviadas.")
             except Exception as e:
                 print(f"❌ Erro ao digitar: {e}")
-        else:
-            print("❌ Falha: Inputs existem mas não identifiquei usuário/senha.")
-
+        
         print("⏳ Aguardando redirecionamento...")
         time.sleep(15)
         
@@ -144,7 +121,50 @@ def fazer_login_automatico(driver):
 
     except Exception as e:
         print(f"❌ Falha crítica no login: {e}")
+
+def preparar_abas(driver):
+    """
+    Configura o ambiente de DUAS ABAS:
+    - Aba 0: Dashboard (Mantém sessão viva)
+    - Aba 1: Mapa (Fica aberta direto para leitura rápida)
+    """
+    print("📑 Configurando sistema de ABAS...")
+    try:
+        # Garante que estamos na Aba 0 (Dashboard)
+        driver.switch_to.window(driver.window_handles[0])
+        if "dashboard" not in driver.current_url:
+            driver.get(URL_DASHBOARD)
+            time.sleep(5)
+
+        # Abre Aba 1 (Mapa) se não existir
+        if len(driver.window_handles) < 2:
+            print("➕ Abrindo nova aba para o Mapa...")
+            driver.execute_script("window.open('about:blank', '_blank');")
+            time.sleep(2)
         
+        # Vai para a Aba 1 e carrega o mapa via CLIQUE (Segurança)
+        driver.switch_to.window(driver.window_handles[1])
+        print("🗺️ Carregando Mapa na Aba 2...")
+        
+        driver.get(URL_DASHBOARD) # Entra no dashboard na aba 2
+        time.sleep(5)
+        
+        try:
+            print("🔎 Clicando no botão 'Ver Mapa' na Aba 2...")
+            driver.find_element(By.PARTIAL_LINK_TEXT, "Ver Mapa").click()
+            time.sleep(10)
+        except:
+            print("⚠️ Clique falhou na Aba 2, tentando URL direta...")
+            driver.get(URL_MAPA)
+            time.sleep(10)
+        
+        # Volta o foco para a Aba 0 para começar o ciclo
+        driver.switch_to.window(driver.window_handles[0])
+        print("✅ Sistema de abas pronto!")
+        
+    except Exception as e:
+        print(f"❌ Erro ao preparar abas: {e}")
+
 # ==============================================================================
 # 💾 3. PERSISTÊNCIA E MENSAGENS
 # ==============================================================================
@@ -171,49 +191,23 @@ def enviar_mensagem_evolution(mensagem, destinatarios):
     if not isinstance(destinatarios, list): destinatarios = [destinatarios]
     
     for target_key in destinatarios:
-        # Pega o ID e garante que não tem espaços
         numero = MAPA_CONTATOS.get(target_key, target_key).strip()
+        print(f"📤 [API] Enviando para {target_key}...")
         
-        print(f"📤 [API] Tentando enviar para {target_key} ({numero})...")
-        
-        # URL Correta (sem barra no final nas configs globais)
         url = f"{EVOLUTION_URL}/message/sendText/{EVOLUTION_INSTANCE}"
+        headers = {"apikey": EVOLUTION_APIKEY, "Content-Type": "application/json"}
         
-        headers = {
-            "apikey": EVOLUTION_APIKEY,
-            "Content-Type": "application/json"
-        }
-        
-        # --- CORREÇÃO AQUI ---
-        # Usamos a estrutura COMPLETA para todos (Grupos e Contatos)
-        # Isso evita o Erro 400 por JSON mal formatado
         payload = {
             "number": numero,
-            "options": {
-                "delay": 1200,
-                "presence": "composing",
-                "linkPreview": False
-            },
-            "textMessage": {
-                "text": mensagem
-            }
+            "options": {"delay": 1200, "presence": "composing", "linkPreview": False},
+            "textMessage": {"text": mensagem}
         }
 
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=15)
-            
-            if response.status_code in [200, 201]:
-                print(f"✅ [SUCESSO] Mensagem enviada para {target_key}")
-            else:
-                # Aqui veremos o detalhe do erro 400 se persistir
-                print(f"❌ [ERRO API] Status: {response.status_code}")
-                print(f"📝 [RESPOSTA] {response.text}")
-
-        except Exception as e:
-            print(f"❌ [ERRO CONEXÃO] {e}")
-            
+            requests.post(url, json=payload, headers=headers, timeout=10)
+        except: pass
         time.sleep(1)
-        
+
 # ==============================================================================
 # 🛠️ 4. FERRAMENTAS DO SISTEMA
 # ==============================================================================
@@ -223,16 +217,10 @@ def criar_driver_painel():
     if not os.path.exists(CAMINHO_PERFIL_PAINEL): os.makedirs(CAMINHO_PERFIL_PAINEL)
     options.add_argument("-profile"); options.add_argument(CAMINHO_PERFIL_PAINEL)
     options.add_argument("--headless") 
-    
-    # --- NOVO: Configurações para evitar tela branca ---
-    options.add_argument("--window-size=1920,1080") # Tela grande
-    options.add_argument("--width=1920")
-    options.add_argument("--height=1080")
-    # Finge ser um navegador comum para evitar bloqueios
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--width=1920"); options.add_argument("--height=1080")
     options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-    
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--no-sandbox"); options.add_argument("--disable-dev-shm-usage")
     servico = Service(GeckoDriverManager().install())
     return webdriver.Firefox(service=servico, options=options)
 
@@ -244,262 +232,59 @@ def ler_texto(driver, xpath):
 
 def obter_uso_vps():
     try:
-        cpu_uso = psutil.cpu_percent(interval=1)
         mem = psutil.virtual_memory()
-        ram_uso_gb = mem.used / (1024 ** 3)
-        ram_total_gb = mem.total / (1024 ** 3)
-        return cpu_uso, mem.percent, f"{ram_uso_gb:.1f}GB/{ram_total_gb:.1f}GB"
-    except: return 0, 0, "?/?"
+        return psutil.cpu_percent(interval=1), mem.percent, f"{mem.used/(1024**3):.1f}GB"
+    except: return 0, 0, "?"
 
 def filtrar_dados_offline(texto_bruto):
     if not texto_bruto: return "🚫 Dados Carregando..."
     try:
-        # Busca por "Nome:" seguido de qualquer texto até o fim da linha
         match_nome = re.search(r'Nome:\s*(.+)', texto_bruto)
         nome = match_nome.group(1).strip() if match_nome else "Motorista"
-        
-        # Busca por "Celular:" (ignorando maiúsculas/minúsculas) e pega números/traços
         match_cel = re.search(r'Celular:\s*([0-9\(\)\-\s]+)', texto_bruto, re.IGNORECASE)
         telefone = match_cel.group(1).strip() if match_cel else "Sem nº"
-
         return f"🚫 {nome} \n📞 {telefone}"
     except: return f"🚫 Erro Leitura"
 
 # ==============================================================================
-# 🧩 5. TAREFAS DE MONITORAMENTO
+# 🧩 5. TAREFAS (COM SUPORTE A DUAS ABAS)
 # ==============================================================================
-def tarefa_offline(driver_painel):
+
+def verificar_sessao_e_trocar_aba(driver, indice_aba):
     """
-    Lê do PAINEL via Selenium, manda no ZAP via Evolution API.
+    Garante que estamos na aba certa e logados.
     """
-    print("\n🔍 [OFFLINE] Buscando pinos amarelos...")
-    
     try:
-        # --- 1. Navegação no Painel ---
-        if URL_MAPA not in driver_painel.current_url:
-            driver_painel.get(URL_MAPA)
-            time.sleep(5)
-        else:
-            driver_painel.refresh()
-            time.sleep(10)
-
-        # Busca os elementos
-        amarelos = driver_painel.find_elements(By.CSS_SELECTOR, "img[src*='pin-amarelo.png']")
-        qtd_offline = len(amarelos)
+        driver.switch_to.window(driver.window_handles[indice_aba])
         
-        if qtd_offline == 0:
-            print("✅ [OFFLINE] Rede estável.")
-            return
-
-        # --- 2. Caso Crítico ---
-        if qtd_offline >= QTD_CRITICA_OFFLINE:
-            print(f"⚠️ [CRÍTICO] {qtd_offline} offlines!")
-            mensagem = (
-                f"⚠️ *AVISO DE INSTABILIDADE DE REDE*\n\n"
-                f"O sistema detectou **{qtd_offline} motoristas offline** simultaneamente.\n"
-                f"Possível falha na operadora de telefonia. Recomendamos reiniciar os aparelhos."
-            )
-            enviar_mensagem_evolution(mensagem, NOME_GRUPO_AVISOS)
-            return
-
-        # --- 3. Leitura Individual ---
-        print(f"⚠️ [OFFLINE] {qtd_offline} detectados. Lendo...")
-        lista_final = []
-
-        # Limita a 15 para não travar
-        for pino in amarelos[:15]: 
-            try:
-                driver_painel.execute_script("arguments[0].click();", pino)
-                time.sleep(1.5)
-                
-                try:
-                    balao = driver_painel.find_element(By.CLASS_NAME, "gm-style-iw")
-                    # Usa a função auxiliar criada
-                    lista_final.append(f"🔸 {filtrar_dados_offline(balao.text)}")
-                except: 
-                    lista_final.append("🚫 Erro ao ler balão")
-                
-                try: driver_painel.find_element(By.CLASS_NAME, "gm-ui-hover-effect").click()
-                except: driver_painel.find_element(By.TAG_NAME, 'body').click()
-                time.sleep(0.5)
-            except: 
-                continue
-
-        # --- 4. Envio do Relatório ---
-        if lista_final:
-            texto_zap = "\n".join(lista_final)
-            mensagem = (
-                f"⚠️ *ALERTA: MOTORISTAS OFFLINE - {time.strftime('%H:%M')}*\n"
-                f"📡 Total Sem Sinal: {qtd_offline}\n\n"
-                f"{texto_zap}"
-            )
-            enviar_mensagem_evolution(mensagem, NOME_GRUPO_AVISOS)
-
-    except Exception as e:
-        print(f"❌ Erro Tarefa Offline: {e}")
-
-def tarefa_offline(driver_painel):
-    """
-    Lê do PAINEL via Selenium, manda no ZAP via Evolution API.
-    """
-    print("\n🔍 [OFFLINE] Buscando pinos amarelos...")
-    
-    try:
-        # --- 1. Navegação no Painel ---
-        if URL_MAPA not in driver_painel.current_url:
-            driver_painel.get(URL_MAPA)
-            time.sleep(5)
-        else:
-            driver_painel.refresh()
-            time.sleep(10)
-
-        # Busca os elementos
-        amarelos = driver_painel.find_elements(By.CSS_SELECTOR, "img[src*='pin-amarelo.png']")
-        qtd_offline = len(amarelos)
-        
-        if qtd_offline == 0:
-            print("✅ [OFFLINE] Rede estável.")
-            return
-
-        # --- 2. Caso Crítico ---
-        if qtd_offline >= QTD_CRITICA_OFFLINE:
-            print(f"⚠️ [CRÍTICO] {qtd_offline} offlines!")
-            mensagem = (
-                f"⚠️ *AVISO DE INSTABILIDADE DE REDE*\n\n"
-                f"O sistema detectou **{qtd_offline} motoristas offline** simultaneamente.\n"
-                f"Possível falha na operadora de telefonia. Recomendamos reiniciar os aparelhos."
-            )
-            enviar_mensagem_evolution(mensagem, NOME_GRUPO_AVISOS)
-            return
-
-        # --- 3. Leitura Individual ---
-        print(f"⚠️ [OFFLINE] {qtd_offline} detectados. Lendo...")
-        lista_final = []
-
-        # Limita a 15 para não travar
-        for pino in amarelos[:15]: 
-            try:
-                driver_painel.execute_script("arguments[0].click();", pino)
-                time.sleep(1.5)
-                
-                try:
-                    balao = driver_painel.find_element(By.CLASS_NAME, "gm-style-iw")
-                    # Usa a função auxiliar criada
-                    lista_final.append(f"🔸 {filtrar_dados_offline(balao.text)}")
-                except: 
-                    lista_final.append("🚫 Erro ao ler balão")
-                
-                try: driver_painel.find_element(By.CLASS_NAME, "gm-ui-hover-effect").click()
-                except: driver_painel.find_element(By.TAG_NAME, 'body').click()
-                time.sleep(0.5)
-            except: 
-                continue
-
-        # --- 4. Envio do Relatório ---
-        if lista_final:
-            texto_zap = "\n".join(lista_final)
-            mensagem = (
-                f"⚠️ *ALERTA: MOTORISTAS OFFLINE - {time.strftime('%H:%M')}*\n"
-                f"📡 Total Sem Sinal: {qtd_offline}\n\n"
-                f"{texto_zap}"
-            )
-            enviar_mensagem_evolution(mensagem, NOME_GRUPO_AVISOS)
-
-    except Exception as e:
-        print(f"❌ Erro Tarefa Offline: {e}")
-        
-def tarefa_frota(driver):
-    global ultimo_aviso_reforco
-    print("\n🚗 [FROTA] Iniciando navegação...")
-    
-    try:
-        # --- 1. VERIFICAÇÃO DE SEGURANÇA (AJUSTADA) ---
-        # Só reinicia se tiver LOGO + CAMPO DE SENHA (Sinal que deslogou de verdade)
+        # Verifica queda de sessão (Logo + Senha)
         tem_logo = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='logoLogin']")) > 0
         tem_senha = len(driver.find_elements(By.CSS_SELECTOR, "input[type='password']")) > 0
         
         if tem_logo and tem_senha:
-            print("⚠️ Sessão caiu REALMENTE (Login detectado). Reiniciando container...")
+            print("🔥 SESSÃO CAIU! Reiniciando container para limpar tudo...")
             driver.quit(); sys.exit(0)
+            
+        return True
+    except IndexError:
+        print("⚠️ Aba fechada inesperadamente. Reiniciando...")
+        driver.quit(); sys.exit(0)
+    except Exception:
+        return False
 
-        # --- 2. NAVEGAÇÃO HUMANA (CLICAR NO BOTÃO) ---
-        # O log de descoberta mostrou que o link se chama 'Ver Mapa'
-        if "vermapa" not in driver.current_url:
-            print("🔄 Indo para o Dashboard para achar o botão...")
-            if "dashboard" not in driver.current_url:
-                driver.get(URL_DASHBOARD)
-                time.sleep(5)
-            
-            print("🔎 Clicando em 'Ver Mapa'...")
-            try:
-                # Clica no link descoberto no log anterior
-                driver.find_element(By.PARTIAL_LINK_TEXT, "Ver Mapa").click()
-                print("🖱️ Clique realizado! Aguardando mapa...")
-                time.sleep(15) 
-            except:
-                print("⚠️ Clique falhou. Tentando URL direta...")
-                driver.get(URL_MAPA)
-                time.sleep(15)
-
-        # --- 3. CONTAGEM DOS CARROS ---
-        print("👀 Contando veículos na tela...")
-        
-        livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
-        ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho']")) + \
-                   len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
-        
-        # PLANO B: Contagem Genérica (Se ícones mudaram)
-        if livres == 0 and ocupados == 0:
-             todas_imgs = driver.find_elements(By.CSS_SELECTOR, "img[src*='.png']")
-             potenciais_carros = [
-                 img for img in todas_imgs 
-                 if "logo" not in img.get_attribute("src") 
-                 and "purple" not in img.get_attribute("src")
-                 and "user" not in img.get_attribute("src")
-             ]
-             
-             if len(potenciais_carros) > 0:
-                 print(f"⚠️ Contagem por ícones genéricos: {len(potenciais_carros)}")
-                 ocupados = len(potenciais_carros) 
-             
-        total = livres + ocupados
-        print(f"🔢 Contagem Final: Livres={livres} | Ocupados={ocupados} | Total={total}")
-        
-        # --- 4. RELATÓRIOS ---
-        if total > estatisticas_dia['pico']:
-            estatisticas_dia['pico'] = total; estatisticas_dia['hora_pico'] = time.strftime('%H:%M'); salvar_dados()
-        
-        if total > 0:
-            porc = round((ocupados / total) * 100)
-            status = "🟢" if porc <= 40 else "🟡" if porc <= 75 else "🔴 ALTA"
-            
-            msg_stats = (
-            f"📊 *STATUS DA FROTA | {time.strftime('%H:%M')}*\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"{status} - {porc}% de ocupação\n\n"
-            f"🟢 Disponíveis: {livres}\n"
-            f"🔴 Em Atendimento: {ocupados}\n"
-            f"🚗 Total Logado: {total}\n"
-            f"━━━━━━━━━━━━━━━━━━"
-            )
-            enviar_mensagem_evolution(msg_stats, "GRUPO_AVISOS")
-            
-            agora = time.time()
-            if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
-                enviar_mensagem_evolution(f"⚠️ *REFORÇO:* Demanda alta ({porc}%).", "GRUPO_AVISOS")
-                ultimo_aviso_reforco = agora
-                
-    except SystemExit: raise 
-    except Exception as e:
-        print(f"❌ Erro Frota: {e}")
-        
 def tarefa_dashboard(driver, enviar=True):
-    print("\n📈 [DASHBOARD] Lendo...")
+    print("\n📈 [DASHBOARD - ABA 1] Lendo...")
+    # Muda para ABA 0 (Dashboard)
+    verificar_sessao_e_trocar_aba(driver, 0)
+    
     try:
-        driver.get(URL_DASHBOARD); time.sleep(8)
-        xp_sol = '/html/body/div/app/div/div/div[2]/div[2]/div/div[1]/h3'
-        xp_con = '/html/body/div/app/div/div/div[2]/div[3]/div/div[1]/h3'
+        # Recarrega para manter sessão viva (Heartbeat)
+        driver.refresh()
+        time.sleep(5)
+        
         try:
+            xp_sol = '/html/body/div/app/div/div/div[2]/div[2]/div/div[1]/h3'
+            xp_con = '/html/body/div/app/div/div/div[2]/div[3]/div/div[1]/h3'
             txt_sol = ler_texto(driver, xp_sol); txt_con = ler_texto(driver, xp_con)
             sol = int(txt_sol.replace('.','')); con = int(txt_con.replace('.',''))
             perdidas = sol - con
@@ -508,15 +293,96 @@ def tarefa_dashboard(driver, enviar=True):
         
         if enviar:
             msg = (
-                f"📈 *Relatório de Desempenho - {time.strftime('%H:%M')}*\n"
-                f"📥 Solicitações: {txt_sol}\n"
-                f"✅ Finalizadas: {txt_con}\n"
-                f"🚫 Não Atendidas: {perdidas}\n"
-                f"📊 Taxa de Conversão: {conversao}%"
+                f"📈 *Relatório - {time.strftime('%H:%M')}*\n"
+                f"📥 Solicitações: {txt_sol}\n✅ Finalizadas: {txt_con}\n"
+                f"🚫 Perdidas: {perdidas}\n📊 Conversão: {conversao}%"
             )
             enviar_mensagem_evolution(msg, LISTA_RELATORIOS)
         return sol, con, perdidas
     except: return 0, 0, 0
+
+def tarefa_frota(driver):
+    global ultimo_aviso_reforco
+    print("\n🚗 [FROTA - ABA 2] Verificando...")
+    # Muda para ABA 1 (Mapa)
+    verificar_sessao_e_trocar_aba(driver, 1)
+
+    try:
+        # Garante que estamos no mapa
+        if "vermapa" not in driver.current_url:
+            print("🔄 Mapa não detectado na Aba 2. Tentando recarregar...")
+            driver.get(URL_MAPA); time.sleep(10)
+
+        # Contagem
+        livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
+        ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho']")) + \
+                   len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
+        
+        # Plano B: Genéricos
+        if livres == 0 and ocupados == 0:
+             imgs = driver.find_elements(By.CSS_SELECTOR, "img[src*='.png']")
+             potenciais = [i for i in imgs if "logo" not in i.get_attribute("src") and "user" not in i.get_attribute("src")]
+             if len(potenciais) > 0: 
+                 print(f"⚠️ Contagem Genérica: {len(potenciais)}")
+                 ocupados = len(potenciais)
+             
+        total = livres + ocupados
+        print(f"🔢 Frota: {total} (L:{livres}/O:{ocupados})")
+        
+        if total > estatisticas_dia['pico']:
+            estatisticas_dia['pico'] = total; estatisticas_dia['hora_pico'] = time.strftime('%H:%M'); salvar_dados()
+        
+        if total > 0:
+            porc = round((ocupados / total) * 100)
+            status = "🟢" if porc <= 40 else "🟡" if porc <= 75 else "🔴 ALTA"
+            msg = (
+            f"📊 *STATUS FROTA | {time.strftime('%H:%M')}*\n"
+            f"{status} - {porc}% ocupado\n🟢 Livres: {livres}\n🔴 Ocupados: {ocupados}\n🚗 Total: {total}"
+            )
+            enviar_mensagem_evolution(msg, NOME_GRUPO_AVISOS)
+            
+            agora = time.time()
+            if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
+                enviar_mensagem_evolution(f"⚠️ *REFORÇO:* Demanda alta ({porc}%).", NOME_GRUPO_AVISOS)
+                ultimo_aviso_reforco = agora
+
+    except SystemExit: raise
+    except Exception as e: print(f"❌ Erro Frota: {e}")
+
+def tarefa_offline(driver):
+    print("\n🔍 [OFFLINE - ABA 2] Buscando...")
+    # Muda para ABA 1 (Mapa)
+    verificar_sessao_e_trocar_aba(driver, 1)
+    
+    try:
+        amarelos = driver.find_elements(By.CSS_SELECTOR, "img[src*='pin-amarelo.png']")
+        qtd = len(amarelos)
+        
+        if qtd >= QTD_CRITICA_OFFLINE:
+            msg = f"⚠️ *CRÍTICO:* {qtd} motoristas offline! Verifique a rede."
+            enviar_mensagem_evolution(msg, NOME_GRUPO_AVISOS)
+            return
+
+        if qtd > 0:
+            print(f"⚠️ {qtd} Offlines. Lendo detalhes...")
+            lista = []
+            for pino in amarelos[:10]:
+                try:
+                    driver.execute_script("arguments[0].click();", pino); time.sleep(1)
+                    txt = driver.find_element(By.CLASS_NAME, "gm-style-iw").text
+                    lista.append(f"🔸 {filtrar_dados_offline(txt)}")
+                    try: driver.find_element(By.CLASS_NAME, "gm-ui-hover-effect").click()
+                    except: pass
+                except: continue
+            
+            if lista:
+                msg = f"⚠️ *OFFLINES - {time.strftime('%H:%M')}*\n📡 Total: {qtd}\n\n" + "\n".join(lista)
+                enviar_mensagem_evolution(msg, NOME_GRUPO_AVISOS)
+        else:
+            print("✅ Rede estável.")
+
+    except SystemExit: raise
+    except Exception as e: print(f"❌ Erro Offline: {e}")
 
 def tarefa_heartbeat():
     uptime = round((time.time() - hora_inicio_bot) / 3600, 1)
@@ -533,75 +399,57 @@ def tarefa_fechamento_dia(driver):
     estatisticas_dia['pico'] = 0; estatisticas_dia['fechamento_enviado'] = True; salvar_dados()
 
 def tarefa_reiniciar_bot(driver, motivo):
-    """Fecha o navegador e mata o processo. O EasyPanel reinicia sozinho."""
     print(f"🔄 [RESTART] Reiniciando: {motivo}")
     try:
-        msg = f"♻️ *REINÍCIO AUTOMÁTICO (3h)*\n\nMotivo: {motivo}\nVoltaremos em alguns segundos..."
+        msg = f"♻️ *REINÍCIO (3h)*\nMotivo: {motivo}"
         enviar_mensagem_evolution(msg, ADMINS_TECNICOS)
         driver.quit()
     except: pass
-    
-    time.sleep(2)
-    sys.exit(0) # Isso encerra o Python e o Docker reinicia ele limpo
+    time.sleep(2); sys.exit(0)
 
 # ==============================================================================
-# 🔄 6. LOOP PRINCIPAL
+# 🔄 LOOP
 # ==============================================================================
 if __name__ == "__main__":
-    print("🚀 Iniciando MESTRE (Automático via Evolution)...")
+    print("🚀 Iniciando MESTRE (Modo Multi-Abas)...")
     
-    # 1. Cria o navegador
     driver = criar_driver_painel()
-    
-    # 2. Faz o Login Automático
     fazer_login_automatico(driver)
+    preparar_abas(driver) # <--- ABRE A SEGUNDA ABA AQUI
     
     agora = time.time()
-    t_off = agora + 10     # Começa em 10s
-    t_frota = agora + 20   # Começa em 20s
-    t_dash = agora + 60    # Começa em 60s
-    t_heart = agora + 5    # Manda sinal de vida logo
-    t_restart = agora + (3 * 60 * 60)
+    t_off = agora + 10; t_frota = agora + 20
+    t_dash = agora + 60; t_heart = agora + 5
+    t_restart = agora + (3 * 3600)
 
-    enviar_mensagem_evolution("🚀 *Sistema Iniciado e Logado.*", ADMINS_TECNICOS)
+    enviar_mensagem_evolution("🚀 *Sistema Iniciado (Multi-Abas).*", ADMINS_TECNICOS)
 
     while True:
         try:
             agora = time.time()
             
-            # --- TAREFAS ---
             if agora >= t_off: 
-                tarefa_offline(driver)
-                t_off = agora + (TEMPO_OFFLINE * 60)
+                tarefa_offline(driver); t_off = agora + (TEMPO_OFFLINE * 60)
             
             if agora >= t_frota: 
-                tarefa_frota(driver)
-                t_frota = agora + (TEMPO_FROTA * 60)
+                tarefa_frota(driver); t_frota = agora + (TEMPO_FROTA * 60)
             
             if agora >= t_dash: 
-                tarefa_dashboard(driver)
-                t_dash = agora + (TEMPO_CORRIDAS * 60)
+                tarefa_dashboard(driver); t_dash = agora + (TEMPO_CORRIDAS * 60)
             
             if agora >= t_heart:
-                tarefa_heartbeat()
-                t_heart = agora + (TEMPO_HEARTBEAT * 60)
-                gc.collect() # Limpa memória RAM
-            if agora >= t_restart:
-                # Passamos o 'driver' para ele poder fechar o navegador antes de sair
-                tarefa_reiniciar_bot(driver, "Manutenção programada")
+                tarefa_heartbeat(); t_heart = agora + (TEMPO_HEARTBEAT * 60); gc.collect()
 
-            # --- FECHAMENTO (23:59) ---
+            if agora >= t_restart:
+                tarefa_reiniciar_bot(driver, "Manutenção")
+
             hora = time.localtime()
             if hora.tm_hour == 23 and hora.tm_min >= 58 and not estatisticas_dia['fechamento_enviado']:
                 tarefa_fechamento_dia(driver)
-            
-            # Reseta flag meia-noite
             if hora.tm_hour == 0 and hora.tm_min == 1:
                 estatisticas_dia['fechamento_enviado'] = False
 
-            time.sleep(10) # Delay para economizar CPU
+            time.sleep(10)
 
-        except KeyboardInterrupt:
-            driver.quit(); break
-        except Exception as e:
-            print(f"⚠️ Erro Global Loop: {e}"); time.sleep(15)
+        except KeyboardInterrupt: driver.quit(); break
+        except Exception as e: print(f"⚠️ Erro Loop: {e}"); time.sleep(15)
