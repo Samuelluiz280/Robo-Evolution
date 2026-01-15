@@ -315,35 +315,50 @@ def tarefa_offline(driver_painel):
 
 def tarefa_frota(driver):
     global ultimo_aviso_reforco
-    print("\n🚗 [FROTA] Verificando...")
+    print("\n🚗 [FROTA - MODO DIAGNÓSTICO] Verificando...")
+    
     try:
-        if URL_MAPA not in driver.current_url: driver.get(URL_MAPA); time.sleep(15)
+        # Garante que está na página certa
+        if URL_MAPA not in driver.current_url: 
+            print("🔄 Indo para página do mapa...")
+            driver.get(URL_MAPA)
+            time.sleep(15) # Tempo generoso para carregar tudo
+        else:
+            print("🔄 Recarregando mapa para garantir...")
+            driver.refresh()
+            time.sleep(15)
+
+        # 1. Tenta pegar TODAS as imagens da tela
+        todas_imagens = driver.find_elements(By.TAG_NAME, "img")
+        print(f"🧐 O robô encontrou {len(todas_imagens)} imagens totais na tela.")
+        
+        # 2. Imprime o link (src) das primeiras 30 imagens para a gente ler
+        print("--- LISTA DE IMAGENS ENCONTRADAS ---")
+        contagem_print = 0
+        for img in todas_imagens:
+            try:
+                src = img.get_attribute("src")
+                if src and len(src) > 5: # Só imprime se tiver link
+                    # Imprime apenas o final do link para facilitar a leitura
+                    nome_arquivo = src.split("/")[-1]
+                    print(f"🖼️ Imagem: {nome_arquivo}")
+                    contagem_print += 1
+                    if contagem_print >= 30: break # Para não poluir demais
+            except: pass
+        print("----------------------------------------")
+
+        # 3. Tenta contar do jeito antigo (só para comparar)
         livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
         ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho']")) + \
                    len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
-        total = livres + ocupados
-        if total > estatisticas_dia['pico']:
-            estatisticas_dia['pico'] = total; estatisticas_dia['hora_pico'] = time.strftime('%H:%M'); salvar_dados()
         
-        if total >= 0:
-            porc = round((ocupados / total) * 100) if total > 0 else 0
-            status = "🟢" if porc <= 40 else "🟡" if porc <= 75 else "🔴 ALTA"
-            msg_stats = (
-            f"📊 *STATUS DA FROTA | {time.strftime('%H:%M')}*\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"{status} - {porc}% de ocupação\n\n"
-            f"🟢 Disponíveis: {livres}\n"
-            f"🔴 Em Atendimento: {ocupados}\n"
-            f"🚗 Total Logado: {total}\n"
-            f"━━━━━━━━━━━━━━━━━━"
-            )
-            enviar_mensagem_evolution(msg_stats, "GRUPO_AVISOS")
-            
-            agora = time.time()
-            if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
-                enviar_mensagem_evolution(f"⚠️ *REFORÇO:* Demanda alta ({porc}%).", "GRUPO_AVISOS")
-                ultimo_aviso_reforco = agora
-    except: pass
+        print(f"🔢 Contagem atual (seletor antigo): Livres={livres} | Ocupados={ocupados}")
+        
+        # Não vamos enviar mensagem agora para não spammar o grupo com "0 carros"
+        # O objetivo agora é só olhar o LOG.
+
+    except Exception as e:
+        print(f"❌ Erro Diagnóstico Frota: {e}")
 
 def tarefa_dashboard(driver, enviar=True):
     print("\n📈 [DASHBOARD] Lendo...")
