@@ -31,9 +31,9 @@ USUARIO_PAINEL = os.getenv("PAINEL_USER", "admin@teste.com")
 SENHA_PAINEL = os.getenv("PAINEL_PASS", "123456")
 
 # --- EVOLUTION API ---
-EVOLUTION_URL = "https://n8n-evolution.laalxr.easypanel.host/"      
-EVOLUTION_INSTANCE = "Teste1"        
-EVOLUTION_APIKEY = "7E822A437B97-4398-9E67-FFF8C7BCE2DA"           
+EVOLUTION_URL = "https://n8n-evolution-teste.laalxr.easypanel.host/"      
+EVOLUTION_INSTANCE = "Evoteste"        
+EVOLUTION_APIKEY = "2026-01-14T11:55:42.000Z"           
 
 # --- 👥 CONTATOS (IDs) ---
 MAPA_CONTATOS = {
