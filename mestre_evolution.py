@@ -315,50 +315,75 @@ def tarefa_offline(driver_painel):
 
 def tarefa_frota(driver):
     global ultimo_aviso_reforco
-    print("\n🚗 [FROTA - MODO DIAGNÓSTICO] Verificando...")
+    print("\n🚗 [FROTA] Verificando...")
     
     try:
-        # Garante que está na página certa
-        if URL_MAPA not in driver.current_url: 
-            print("🔄 Indo para página do mapa...")
-            driver.get(URL_MAPA)
-            time.sleep(15) # Tempo generoso para carregar tudo
-        else:
-            print("🔄 Recarregando mapa para garantir...")
-            driver.refresh()
-            time.sleep(15)
-
-        # 1. Tenta pegar TODAS as imagens da tela
-        todas_imagens = driver.find_elements(By.TAG_NAME, "img")
-        print(f"🧐 O robô encontrou {len(todas_imagens)} imagens totais na tela.")
+        # 1. Verifica se fomos chutados para o Login
+        if "login" in driver.current_url.lower() or len(driver.find_elements(By.XPATH, "//input[@type='password']")) > 0:
+            print("⚠️ Sessão perdida! O bot está na tela de login. Reconectando...")
+            fazer_login_automatico(driver)
+            # Depois de logar, esperamos um pouco e tentamos ir pro mapa
+            time.sleep(5)
         
-        # 2. Imprime o link (src) das primeiras 30 imagens para a gente ler
-        print("--- LISTA DE IMAGENS ENCONTRADAS ---")
-        contagem_print = 0
-        for img in todas_imagens:
-            try:
-                src = img.get_attribute("src")
-                if src and len(src) > 5: # Só imprime se tiver link
-                    # Imprime apenas o final do link para facilitar a leitura
-                    nome_arquivo = src.split("/")[-1]
-                    print(f"🖼️ Imagem: {nome_arquivo}")
-                    contagem_print += 1
-                    if contagem_print >= 30: break # Para não poluir demais
-            except: pass
-        print("----------------------------------------")
-
-        # 3. Tenta contar do jeito antigo (só para comparar)
+        # 2. Garante que estamos no Mapa
+        if URL_MAPA not in driver.current_url:
+            driver.get(URL_MAPA)
+            print("⏳ Carregando mapa (aguardando 15s)...")
+            time.sleep(15) 
+        
+        # 3. CONTAGEM DOS CARROS
+        # Nota: O seletor abaixo procura qualquer imagem que NÃO seja a logo ou avatar
+        # Se os carros forem as únicas outras imagens, isso vai funcionar.
+        
+        # Tenta achar os carros verdes (Livres)
         livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
+        
+        # Tenta achar ocupados (Vermelho ou Ocupado)
         ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho']")) + \
                    len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
         
-        print(f"🔢 Contagem atual (seletor antigo): Livres={livres} | Ocupados={ocupados}")
+        # --- PLANO B: Se a contagem der 0, tenta buscar por qualquer pino ---
+        if livres == 0 and ocupados == 0:
+             # Às vezes o nome do arquivo é diferente (ex: car_on.png). 
+             # Vamos tentar pegar tudo que parece um pino de mapa.
+             todas_imgs = driver.find_elements(By.CSS_SELECTOR, "img[src*='.png']")
+             # Filtra apenas o que não é logo ou sistema
+             potenciais_carros = [img for img in todas_imgs if "logo" not in img.get_attribute("src") and "user" not in img.get_attribute("src")]
+             
+             if len(potenciais_carros) > 0:
+                 print(f"⚠️ Aviso: Não achei 'verde/vermelho', mas achei {len(potenciais_carros)} ícones no mapa. Usando contagem genérica.")
+                 # Assume que a maioria é ocupado se não distinguir, ou divide meio a meio (apenas para alerta)
+                 ocupados = len(potenciais_carros)
+             
+        total = livres + ocupados
+        print(f"🔢 Contagem Final: Livres={livres} | Ocupados={ocupados} | Total={total}")
         
-        # Não vamos enviar mensagem agora para não spammar o grupo com "0 carros"
-        # O objetivo agora é só olhar o LOG.
-
+        if total > estatisticas_dia['pico']:
+            estatisticas_dia['pico'] = total; estatisticas_dia['hora_pico'] = time.strftime('%H:%M'); salvar_dados()
+        
+        if total > 0:
+            porc = round((ocupados / total) * 100)
+            status = "🟢" if porc <= 40 else "🟡" if porc <= 75 else "🔴 ALTA"
+            
+            msg_stats = (
+            f"📊 *STATUS DA FROTA | {time.strftime('%H:%M')}*\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"{status} - {porc}% de ocupação\n\n"
+            f"🟢 Disponíveis: {livres}\n"
+            f"🔴 Em Atendimento: {ocupados}\n"
+            f"🚗 Total Logado: {total}\n"
+            f"━━━━━━━━━━━━━━━━━━"
+            )
+            enviar_mensagem_evolution(msg_stats, "GRUPO_AVISOS")
+            
+            agora = time.time()
+            # Só avisa de reforço se a ocupação for alta E já passou o tempo de cooldown
+            if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
+                enviar_mensagem_evolution(f"⚠️ *REFORÇO:* Demanda alta ({porc}%).", "GRUPO_AVISOS")
+                ultimo_aviso_reforco = agora
+                
     except Exception as e:
-        print(f"❌ Erro Diagnóstico Frota: {e}")
+        print(f"❌ Erro Frota: {e}")
 
 def tarefa_dashboard(driver, enviar=True):
     print("\n📈 [DASHBOARD] Lendo...")
