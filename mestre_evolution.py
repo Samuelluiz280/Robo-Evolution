@@ -154,22 +154,24 @@ def enviar_mensagem_evolution(mensagem, destinatarios):
     if not isinstance(destinatarios, list): destinatarios = [destinatarios]
     
     for target_key in destinatarios:
-        # Pega o ID e remove espaços em branco extras
+        # Pega o ID e garante que não tem espaços
         numero = MAPA_CONTATOS.get(target_key, target_key).strip()
         
         print(f"📤 [API] Tentando enviar para {target_key} ({numero})...")
         
+        # URL Correta (sem barra no final nas configs globais)
         url = f"{EVOLUTION_URL}/message/sendText/{EVOLUTION_INSTANCE}"
+        
         headers = {
             "apikey": EVOLUTION_APIKEY,
             "Content-Type": "application/json"
         }
         
-        # 🔧 FIX PARA GRUPOS:
-        # Se tiver "@g.us", algumas versões preferem que não use o campo 'number' puramente
-        # ou requerem o campo remoteJid explícito. Vamos enviar de forma híbrida.
+        # --- CORREÇÃO AQUI ---
+        # Usamos a estrutura COMPLETA para todos (Grupos e Contatos)
+        # Isso evita o Erro 400 por JSON mal formatado
         payload = {
-            "number": numero,  # Mantemos para compatibilidade
+            "number": numero,
             "options": {
                 "delay": 1200,
                 "presence": "composing",
@@ -180,38 +182,21 @@ def enviar_mensagem_evolution(mensagem, destinatarios):
             }
         }
 
-        # Se for um grupo, forçamos o remoteJid no nível raiz (algumas versões exigem isso)
-        # Nota: O endpoint /sendText aceita payload simplificado, mas o completo é mais seguro para grupos
-        if "@g.us" in numero:
-             # Sobrescreve payload para formato mais específico se falhar o simples
-             payload = {
-                "number": numero, 
-                "text": mensagem,
-                "delay": 1200,
-                "linkPreview": False
-             }
-             
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=15)
             
-            # --- ÁREA DE DIAGNÓSTICO MELHORADA ---
             if response.status_code in [200, 201]:
-                data = response.json()
-                # Verifica se a API retornou erro lógico mesmo com status 200
-                if 'key' in data or 'message' in data:
-                    print(f"✅ [SUCESSO] Mensagem enviada para {target_key}")
-                else:
-                    print(f"⚠️ [ALERTA] API retornou 200 mas resposta estranha: {data}")
+                print(f"✅ [SUCESSO] Mensagem enviada para {target_key}")
             else:
+                # Aqui veremos o detalhe do erro 400 se persistir
                 print(f"❌ [ERRO API] Status: {response.status_code}")
-                print(f"📝 [BODY] {response.text}")
-            # ---------------------------
+                print(f"📝 [RESPOSTA] {response.text}")
 
         except Exception as e:
-            print(f"❌ [ERRO CONEXÃO] O Python não conseguiu chamar a API: {e}")
+            print(f"❌ [ERRO CONEXÃO] {e}")
             
         time.sleep(1)
-
+        
 # ==============================================================================
 # 🛠️ 4. FERRAMENTAS DO SISTEMA
 # ==============================================================================
