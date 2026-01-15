@@ -318,46 +318,61 @@ def tarefa_frota(driver):
     print("\n🚗 [FROTA] Verificando...")
     
     try:
-        # 1. Verifica se fomos chutados para o Login
-        if "login" in driver.current_url.lower() or len(driver.find_elements(By.XPATH, "//input[@type='password']")) > 0:
-            print("⚠️ Sessão perdida! O bot está na tela de login. Reconectando...")
-            fazer_login_automatico(driver)
-            # Depois de logar, esperamos um pouco e tentamos ir pro mapa
-            time.sleep(5)
+        # --- NOVO DETECTOR DE QUEDA DE SESSÃO ---
+        # 1. Procura pela imagem 'logoLogin.png' que vimos no diagnóstico
+        tem_logo_login = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='logoLogin']")) > 0
         
-        # 2. Garante que estamos no Mapa
-        if URL_MAPA not in driver.current_url:
+        # 2. Procura por campo de senha
+        tem_campo_senha = len(driver.find_elements(By.XPATH, "//input[@type='password']")) > 0
+        
+        # 3. Verifica URL
+        ta_na_url_login = "login" in driver.current_url.lower()
+        
+        # SE QUALQUER UM DESSES FOR VERDADE, A SESSÃO CAIU
+        if tem_logo_login or tem_campo_senha or ta_na_url_login:
+            print(f"⚠️ SESSÃO CAIU! (Logo={tem_logo_login}, Senha={tem_campo_senha})")
+            print("🔄 Forçando reconexão...")
+            
+            # Força ir para a URL de login para garantir que a função de login rode
+            driver.get(URL_LOGIN)
+            time.sleep(2)
+            fazer_login_automatico(driver)
+            
+            # Depois de logar, vai para o mapa
+            print("🗺️ Voltando para o mapa...")
             driver.get(URL_MAPA)
-            print("⏳ Carregando mapa (aguardando 15s)...")
+            time.sleep(15)
+        
+        # Se não caiu, mas não está na URL do mapa, vai pra lá
+        elif URL_MAPA not in driver.current_url:
+            driver.get(URL_MAPA)
             time.sleep(15) 
         
-        # 3. CONTAGEM DOS CARROS
-        # Nota: O seletor abaixo procura qualquer imagem que NÃO seja a logo ou avatar
-        # Se os carros forem as únicas outras imagens, isso vai funcionar.
-        
-        # Tenta achar os carros verdes (Livres)
+        # --- CONTAGEM ---
+        # Agora que garantimos o login, contamos os carros
         livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
         
-        # Tenta achar ocupados (Vermelho ou Ocupado)
         ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho']")) + \
                    len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
         
-        # --- PLANO B: Se a contagem der 0, tenta buscar por qualquer pino ---
+        # PLANO B: Se ainda der zero, conta tudo que não for logo/usuário
         if livres == 0 and ocupados == 0:
-             # Às vezes o nome do arquivo é diferente (ex: car_on.png). 
-             # Vamos tentar pegar tudo que parece um pino de mapa.
              todas_imgs = driver.find_elements(By.CSS_SELECTOR, "img[src*='.png']")
-             # Filtra apenas o que não é logo ou sistema
-             potenciais_carros = [img for img in todas_imgs if "logo" not in img.get_attribute("src") and "user" not in img.get_attribute("src")]
+             # Filtra logoLogin e user-purple
+             potenciais_carros = [
+                 img for img in todas_imgs 
+                 if "logo" not in img.get_attribute("src") 
+                 and "purple" not in img.get_attribute("src")
+             ]
              
              if len(potenciais_carros) > 0:
-                 print(f"⚠️ Aviso: Não achei 'verde/vermelho', mas achei {len(potenciais_carros)} ícones no mapa. Usando contagem genérica.")
-                 # Assume que a maioria é ocupado se não distinguir, ou divide meio a meio (apenas para alerta)
+                 print(f"⚠️ Aviso: Ícones coloridos não achados. Usando {len(potenciais_carros)} ícones genéricos.")
                  ocupados = len(potenciais_carros)
              
         total = livres + ocupados
         print(f"🔢 Contagem Final: Livres={livres} | Ocupados={ocupados} | Total={total}")
         
+        # ... (O resto da lógica de envio continua igual) ...
         if total > estatisticas_dia['pico']:
             estatisticas_dia['pico'] = total; estatisticas_dia['hora_pico'] = time.strftime('%H:%M'); salvar_dados()
         
@@ -377,7 +392,6 @@ def tarefa_frota(driver):
             enviar_mensagem_evolution(msg_stats, "GRUPO_AVISOS")
             
             agora = time.time()
-            # Só avisa de reforço se a ocupação for alta E já passou o tempo de cooldown
             if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
                 enviar_mensagem_evolution(f"⚠️ *REFORÇO:* Demanda alta ({porc}%).", "GRUPO_AVISOS")
                 ultimo_aviso_reforco = agora
