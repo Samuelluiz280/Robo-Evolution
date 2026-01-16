@@ -305,66 +305,127 @@ def tarefa_dashboard(driver, enviar=True):
     except: return 0, 0, 0
 
 def tarefa_monitorar_frota(driver):
-    print("\n🕵️‍♂️ [ESPIÃO] Extraindo código HTML do Mapa...")
+    global ultimo_aviso_reforco, estatisticas_dia
+    print("\n🚗 [FROTA - ABA 1] Iniciando Varredura Profunda...")
     
     try:
-        # 1. Garante aba e URL
+        # 1. Verifica sessão e URL
         if not verificar_sessao_e_trocar_aba(driver, 1): return
         
         if "vermapa" not in driver.current_url:
-            print("🔄 Forçando URL do mapa...")
             driver.get(URL_MAPA); time.sleep(15)
 
-        # 2. Detector de Iframe
-        try:
-            iframe = WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "iframe[src*='google'], iframe[id*='map']"))
-            )
-            print("🖼️ Iframe detectado. Entrando...")
-            driver.switch_to.frame(iframe)
-        except:
-            print("ℹ️ Mapa na raiz (sem iframe).")
-
-        # 3. Espera carregar
-        time.sleep(10)
-
-        # 4. CAPTURA O HTML BRUTO
-        # Pegamos o 'innerHTML' do corpo da página para ver o que foi renderizado
-        print("📥 Baixando HTML da memória...")
-        html_content = driver.find_element(By.TAG_NAME, "body").get_attribute("innerHTML")
+        # 2. ESTRATÉGIA DE CAÇA AOS IFRAMES
+        # Vamos listar TODOS os iframes da página e entrar em um por um até achar os pinos
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        print(f"🔎 Encontrei {len(iframes)} iframes na página. Vou investigar todos.")
         
-        print(f"📄 HTML capturado! Tamanho total: {len(html_content)} caracteres.")
-
-        # 5. FILTRO INTELIGENTE (O que o robô vê?)
-        print("\n--- 🔍 RAIO-X: LINHAS COM IMAGENS OU MARCADORES ---")
-        print("(Mostrando apenas linhas que contêm 'png', 'pin', 'marker' ou 'src')")
-        print("-" * 50)
+        iframe_com_mapa = None
         
-        # O HTML costuma vir tudo numa linha só. Vamos quebrar nas tags '>' para ler
-        linhas = html_content.split(">")
-        contador_pistas = 0
+        # Se tiver iframes, testa um por um
+        if len(iframes) > 0:
+            for i, frame in enumerate(iframes):
+                try:
+                    driver.switch_to.default_content() # Reseta
+                    driver.switch_to.frame(frame)      # Entra no atual
+                    
+                    # Verifica se tem marcadores aqui dentro
+                    qtd_markers = len(driver.find_elements(By.TAG_NAME, "gmp-advanced-marker"))
+                    if qtd_markers > 0:
+                        print(f"✅ ACHEI! O mapa está no Iframe #{i}. (Encontrados: {qtd_markers} marcadores)")
+                        iframe_com_mapa = frame
+                        break # Para de procurar, achamos o pote de ouro
+                except: continue
         
-        for linha in linhas:
-            linha_limpa = linha.lower()
-            # Procura por palavras chave dos seus carros
-            if "pin-" in linha_limpa or "vermelho" in linha_limpa or "verde" in linha_limpa or "gmp-advanced-marker" in linha_limpa:
-                print(f"📍 ACHEI: {linha[:300]}>") # Imprime os primeiros 300 caracteres da linha
-                contador_pistas += 1
-                
-        if contador_pistas == 0:
-            print("❌ NENHUMA linha com 'pin-verde/vermelho' ou 'gmp-marker' foi achada no HTML.")
-            print("Isso significa que o mapa carregou, mas os carros NÃO foram desenhados no código.")
+        # Se achou o iframe certo, garante que estamos nele. Se não, fica na raiz.
+        if iframe_com_mapa:
+            driver.switch_to.default_content()
+            driver.switch_to.frame(iframe_com_mapa)
         else:
-            print(f"✅ Encontrei {contador_pistas} elementos suspeitos (veja acima).")
+            print("ℹ️ Nenhum marcador achado dentro de iframes. Procurando na raiz...")
+            driver.switch_to.default_content()
 
-        print("-" * 50)
+        # 3. EXTRAÇÃO VIA JAVASCRIPT (Burlar o Shadow DOM)
+        # Como o HTML mostrou #shadow-root (closed), o Selenium não vê a imagem dentro.
+        # Mas o Javascript consegue listar os elementos pai e ler os atributos.
+        print("💉 Injetando Javascript para leitura forçada...")
         
-        # Sai do iframe
+        script_extracao = """
+            // Pega todos os marcadores avançados do Google
+            const markers = document.querySelectorAll('gmp-advanced-marker');
+            let dados = { verde: 0, vermelho: 0, amarelo: 0, total: markers.length };
+            
+            markers.forEach(m => {
+                // Tenta ler o HTML interno (mesmo com shadow pode vazar algo no innerHTML do componente)
+                const html = m.innerHTML.toLowerCase();
+                const title = (m.getAttribute('title') || '').toLowerCase();
+                
+                // Tenta identificar a cor pelo nome da imagem se ela tiver sido injetada via slot
+                if (html.includes('pin-verde') || title.includes('livre')) {
+                    dados.verde++;
+                } else if (html.includes('pin-vermelho') || title.includes('ocupado')) {
+                    dados.vermelho++;
+                } else if (html.includes('pin-amarelo')) {
+                    dados.amarelo++;
+                } else {
+                    // Se não achar cor, assume ocupado por segurança
+                    dados.vermelho++;
+                }
+            });
+            return dados;
+        """
+        
+        # Executa o script e pega o resultado pronto
+        resultado = driver.execute_script(script_extracao)
+        
+        imgs_verde = resultado.get('verde', 0)
+        imgs_vermelho = resultado.get('vermelho', 0)
+        imgs_amarelo = resultado.get('amarelo', 0)
+        total_markers = resultado.get('total', 0)
+        
+        print(f"🔢 Leitura JS: Verde={imgs_verde} | Vermelho={imgs_vermelho} | Amarelo={imgs_amarelo} | Total={total_markers}")
+
+        # --- 4. RELATÓRIOS (USANDO DADOS DO JS) ---
+        frota_ativa = total_markers
+        livres = imgs_verde
+        ocupados = imgs_vermelho
+        
+        if frota_ativa == 0:
+            print("⚠️ HTML da página (Primeiros 2000 caracters) para debug:")
+            print(driver.page_source[:2000]) # Mostra o código pro usuário ver se tá carregando
+            return
+
+        # Salva estatísticas
+        if frota_ativa > estatisticas_dia['pico']:
+            estatisticas_dia['pico'] = frota_ativa
+            estatisticas_dia['hora_pico'] = time.strftime('%H:%M')
+            salvar_dados()
+
+        porc = round((ocupados / frota_ativa) * 100) if frota_ativa > 0 else 0
+        situacao = "🟢" if porc < 40 else "🟡" if porc < 75 else "🔴 ALTA"
+
+        msg_stats = (
+            f"📊 *STATUS DA FROTA | {time.strftime('%H:%M')}*\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"{situacao} - {porc}% ocupado\n\n"
+            f"🟢 Disponíveis: {livres}\n"
+            f"🔴 Em Corrida: {ocupados}\n"
+            f"🟡 Sem Rede: {imgs_amarelo}\n"
+            f"🚗 Total Online: {frota_ativa}\n"
+            f"━━━━━━━━━━━━━━━━━━"
+        )
+        enviar_mensagem_evolution(msg_stats, NOME_GRUPO_AVISOS)
+        time.sleep(1)
+
+        agora = time.time()
+        if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
+            enviar_mensagem_evolution(f"⚠️ *REFORÇO NECESSÁRIO:* Demanda alta ({porc}%).", NOME_GRUPO_AVISOS)
+            ultimo_aviso_reforco = agora
+
+    except Exception as e: 
+        print(f"❌ Erro Frota: {e}")
         try: driver.switch_to.default_content()
         except: pass
-
-    except Exception as e:
-        print(f"❌ Erro Espião: {e}")
 
 def tarefa_offline(driver):
     print("\n🔍 [OFFLINE - ABA 2] Buscando...")
