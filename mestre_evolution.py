@@ -220,11 +220,11 @@ def criar_driver_painel():
     
     
     
-    if not os.path.exists(caminho_perfil_windows): 
-        os.makedirs(caminho_perfil_windows)
+    if not os.path.exists(CAMINHO_PERFIL_PAINEL): 
+        os.makedirs(CAMINHO_PERFIL_PAINEL)
         
     options.add_argument("-profile")
-    options.add_argument(caminho_perfil_windows)
+    options.add_argument(CAMINHO_PERFIL_PAINEL)
     
     # --- IMPORTANTE: COMENTE A LINHA ABAIXO PARA VER A TELA ---
     # options.add_argument("--headless") 
