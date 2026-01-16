@@ -274,7 +274,35 @@ def verificar_sessao_e_trocar_aba(driver, indice_aba):
         driver.quit(); sys.exit(0)
     except Exception:
         return False
-
+def tarefa_dashboard(driver, enviar=True):
+    print("\n📈 [DASHBOARD - ABA 1] Lendo...")
+    # Muda para ABA 0 (Dashboard)
+    verificar_sessao_e_trocar_aba(driver, 0)
+    
+    try:
+        # Recarrega para manter sessão viva (Heartbeat)
+        driver.refresh()
+        time.sleep(5)
+        
+        try:
+            xp_sol = '/html/body/div/app/div/div/div[2]/div[2]/div/div[1]/h3'
+            xp_con = '/html/body/div/app/div/div/div[2]/div[3]/div/div[1]/h3'
+            txt_sol = ler_texto(driver, xp_sol); txt_con = ler_texto(driver, xp_con)
+            sol = int(txt_sol.replace('.','')); con = int(txt_con.replace('.',''))
+            perdidas = sol - con
+            conversao = round((con / sol) * 100) if sol > 0 else 0
+        except: sol, con, perdidas = 0, 0, 0
+        
+        if enviar:
+            msg = (
+                f"📈 *Relatório - {time.strftime('%H:%M')}*\n"
+                f"📥 Solicitações: {txt_sol}\n✅ Finalizadas: {txt_con}\n"
+                f"🚫 Perdidas: {perdidas}\n📊 Conversão: {conversao}%"
+            )
+            enviar_mensagem_evolution(msg, LISTA_RELATORIOS)
+        return sol, con, perdidas
+    except: return 0, 0, 0
+    
 def tarefa_monitorar_frota(driver):
     global ultimo_aviso_reforco, estatisticas_dia
     print("\n🚗 [FROTA] Procurando pinos (Modo Persistente)...")
