@@ -275,192 +275,106 @@ def verificar_sessao_e_trocar_aba(driver, indice_aba):
     except Exception:
         return False
 
-def tarefa_dashboard(driver, enviar=True):
-    print("\n📈 [DASHBOARD - ABA 1] Lendo...")
-    # Muda para ABA 0 (Dashboard)
-    verificar_sessao_e_trocar_aba(driver, 0)
-    
-    try:
-        # Recarrega para manter sessão viva (Heartbeat)
-        driver.refresh()
-        time.sleep(5)
-        
-        try:
-            xp_sol = '/html/body/div/app/div/div/div[2]/div[2]/div/div[1]/h3'
-            xp_con = '/html/body/div/app/div/div/div[2]/div[3]/div/div[1]/h3'
-            txt_sol = ler_texto(driver, xp_sol); txt_con = ler_texto(driver, xp_con)
-            sol = int(txt_sol.replace('.','')); con = int(txt_con.replace('.',''))
-            perdidas = sol - con
-            conversao = round((con / sol) * 100) if sol > 0 else 0
-        except: sol, con, perdidas = 0, 0, 0
-        
-        if enviar:
-            msg = (
-                f"📈 *Relatório - {time.strftime('%H:%M')}*\n"
-                f"📥 Solicitações: {txt_sol}\n✅ Finalizadas: {txt_con}\n"
-                f"🚫 Perdidas: {perdidas}\n📊 Conversão: {conversao}%"
-            )
-            enviar_mensagem_evolution(msg, LISTA_RELATORIOS)
-        return sol, con, perdidas
-    except: return 0, 0, 0
-
 def tarefa_monitorar_frota(driver):
     global ultimo_aviso_reforco, estatisticas_dia
-    print("\n🚗 [FROTA - ABA 1] Aguardando carregamento do mapa...")
+    print("\n🚗 [FROTA] Procurando pinos (Modo Persistente)...")
     
     try:
-        # 1. Garante Aba e URL
+        # 1. Garante a URL certa
         if not verificar_sessao_e_trocar_aba(driver, 1): return
-        
         if "vermapa" not in driver.current_url:
             driver.get(URL_MAPA); time.sleep(10)
 
-        # 2. DETECTOR DE "BLAZOR" (Espera a tela branca sumir)
-        # O Blazor geralmente mostra "Loading..." antes de abrir. Vamos esperar passar.
-        try:
-            # Espera até achar o container principal do mapa ou o menu lateral
-            WebDriverWait(driver, 40).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, ".gm-style, .wrapper, .content-wrapper"))
-            )
-        except:
-            print("⚠️ Alerta: O site demorou muito para responder (Blazor Loading).")
-
-        # 3. DETECTOR DE IFRAME (Caso o mapa esteja encapsulado)
-        try:
-            iframe = WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "iframe[src*='google'], iframe[id*='map']"))
-            )
-            print("🖼️ Entrando no Iframe do mapa...")
-            driver.switch_to.frame(iframe)
-        except:
-            print("ℹ️ Verificando mapa na raiz (sem iframe)...")
-
-        # 4. ESPERA DO GOOGLE MAPS (A Chave do Sucesso) 🗝️
-        print("⏳ Aguardando renderização do Google Maps...")
-        try:
-            # Espera a classe padrão do Google Maps aparecer. Se isso não aparecer, o mapa quebrou.
-            WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located((By.CLASS_NAME, "gm-style"))
-            )
-            print("✅ Mapa Google carregado! Esperando pinos...")
-            time.sleep(15) # Dá 15s para os pinos "caírem" no mapa (Blazor é lento)
-        except:
-            print("❌ ERRO CRÍTICO: O Google Maps não carregou.")
-            # Lê o texto da tela para ver se tem erro de API ou WebGL
-            texto_tela = driver.find_element(By.TAG_NAME, "body").text[:500]
-            print(f"📝 Texto visível na tela: {texto_tela}")
-            driver.switch_to.default_content()
-            return
-
-        # 5. CONTAGEM VIA JAVASCRIPT (Blindada)
-        print("💉 Injetando Scanner de Marcadores...")
+        # 2. LOOP DE BUSCA (Tenta por 60 segundos)
+        # Não importa se o mapa carregou ou não, vamos caçar as imagens dos pinos.
+        print("⏳ Aguardando pinos aparecerem na tela (até 60s)...")
         
-        script = """
-            // Tenta achar marcadores modernos (Advanced) e antigos (Legacy)
-            const markersAdv = document.querySelectorAll('gmp-advanced-marker');
-            const markersLeg = document.querySelectorAll('div[role="button"][title]'); // Pinos clássicos
-            const imgsPin = document.querySelectorAll('img[src*="pin-"]'); // Imagens soltas
-
-            let dados = { verde: 0, vermelho: 0, amarelo: 0, total: 0 };
+        imgs_verde = 0
+        imgs_vermelho = 0
+        imgs_amarelo = 0
+        frota_ativa = 0
+        
+        # Tenta 12 vezes (12 x 5 segundos = 60 segundos)
+        for tentativa in range(1, 13):
+            # Procura DIRETO pelas imagens que vimos no seu HTML
+            verdes = driver.find_elements(By.CSS_SELECTOR, "img[src*='pin-verde']")
+            vermelhos = driver.find_elements(By.CSS_SELECTOR, "img[src*='pin-vermelho']")
+            amarelos = driver.find_elements(By.CSS_SELECTOR, "img[src*='pin-amarelo']")
             
-            // Função auxiliar para checar cor
-            function checarCor(txt) {
-                txt = txt.toLowerCase();
-                if (txt.includes('verde') || txt.includes('livre')) return 'verde';
-                if (txt.includes('vermelho') || txt.includes('ocupado')) return 'vermelho';
-                if (txt.includes('amarelo')) return 'amarelo';
-                return 'vermelho'; // Padrão
-            }
-
-            // 1. Prioridade: Marcadores Avançados (Shadow DOM)
-            markersAdv.forEach(m => {
-                dados.total++;
-                // Tenta ler HTML interno ou titulo
-                let conteudo = m.innerHTML + (m.getAttribute('title') || '');
-                let cor = checarCor(conteudo);
-                dados[cor]++;
-            });
-
-            // 2. Se não achou avançados, tenta os pinos normais (Fallback)
-            if (dados.total === 0) {
-                // Conta imagens diretas se existirem
-                imgsPin.forEach(img => {
-                    dados.total++;
-                    let cor = checarCor(img.src);
-                    dados[cor]++;
-                });
-            }
-
-            return dados;
-        """
+            total_agora = len(verdes) + len(vermelhos) + len(amarelos)
+            
+            if total_agora > 0:
+                print(f"✅ Pinos encontrados na tentativa {tentativa}!")
+                imgs_verde = len(verdes)
+                imgs_vermelho = len(vermelhos)
+                imgs_amarelo = len(amarelos)
+                frota_ativa = imgs_verde + imgs_vermelho # Ativos = Verde + Vermelho
+                break # Sai do loop se achou
+            else:
+                print(f"   Wait... ({tentativa}/12)")
+                time.sleep(5)
         
-        resultado = driver.execute_script(script)
-        
-        imgs_verde = resultado.get('verde', 0)
-        imgs_vermelho = resultado.get('vermelho', 0)
-        imgs_amarelo = resultado.get('amarelo', 0)
-        frota_ativa = resultado.get('total', 0)
-        
-        print(f"🔢 Leitura Final: Total={frota_ativa} (Verde:{imgs_verde}/Vermelho:{imgs_vermelho})")
-
-        # Se ainda der zero, vamos ver se tem Clusters (Bolinhas)
+        # --- 3. CONTAGEM FINAL ---
+        # Se ainda for zero, tenta ver se é Cluster (Bolinhas com números)
         total_clusters = 0
         if frota_ativa == 0:
             try:
-                # Procura divs com números pequenos (clusters)
+                # Procura divs com números pequenos
                 divs = driver.find_elements(By.XPATH, "//div[text() and string-length(text())<=3]")
                 for d in divs:
-                    if d.text.isdigit() and d.size['width'] < 60:
+                    if d.text.isdigit() and d.size['width'] < 50:
                         total_clusters += int(d.text)
             except: pass
             
             if total_clusters > 0:
-                print(f"📦 Clusters detectados: {total_clusters} veículos agrupados.")
+                print(f"📦 Clusters (Agrupados) detectados: {total_clusters}")
                 frota_ativa = total_clusters
                 imgs_vermelho = total_clusters # Assume ocupado
 
-        # 6. RELATÓRIOS
-        ocupados = imgs_vermelho
+        print(f"🏁 Resultado: 🟢 L:{imgs_verde} | 🔴 O:{imgs_vermelho} | 🟡 Off:{imgs_amarelo} | 📦 Cluster:{total_clusters}")
+
+        if frota_ativa == 0 and imgs_amarelo == 0:
+            print("⚠️ Tempo esgotado. Nenhum pino encontrado (Mapa vazio ou não carregou imagens).")
+            # Tira um print no log para vermos se a tela tá branca
+            try:
+                print("HTML (Resumo): " + driver.find_element(By.TAG_NAME, "body").text[:200].replace('\n', ' '))
+            except: pass
+            return
+
+        # --- 4. RELATÓRIOS ---
+        # Salva Pico
+        if frota_ativa > estatisticas_dia['pico']:
+            estatisticas_dia['pico'] = frota_ativa
+            estatisticas_dia['hora_pico'] = time.strftime('%H:%M')
+            salvar_dados()
+
+        ocupados = imgs_vermelho + total_clusters
         livres = imgs_verde
         
-        # Sai do iframe
-        driver.switch_to.default_content()
+        porc = round((ocupados / frota_ativa) * 100) if frota_ativa > 0 else 0
+        situacao = "🟢" if porc < 40 else "🟡" if porc < 75 else "🔴 ALTA"
 
-        if frota_ativa > 0:
-            # Salva Pico
-            if frota_ativa > estatisticas_dia['pico']:
-                estatisticas_dia['pico'] = frota_ativa
-                estatisticas_dia['hora_pico'] = time.strftime('%H:%M')
-                salvar_dados()
+        msg_stats = (
+            f"📊 *STATUS DA FROTA | {time.strftime('%H:%M')}*\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"{situacao} - {porc}% ocupado\n\n"
+            f"🟢 Disponíveis: {livres}\n"
+            f"🔴 Em Corrida: {ocupados}\n"
+            f"🟡 Sem Rede: {imgs_amarelo}\n"
+            f"🚗 Total Online: {frota_ativa + imgs_amarelo}\n"
+            f"━━━━━━━━━━━━━━━━━━"
+        )
+        enviar_mensagem_evolution(msg_stats, NOME_GRUPO_AVISOS)
+        time.sleep(1)
 
-            porc = round((ocupados / frota_ativa) * 100)
-            situacao = "🟢" if porc < 40 else "🟡" if porc < 75 else "🔴 ALTA"
-
-            msg_stats = (
-                f"📊 *STATUS DA FROTA | {time.strftime('%H:%M')}*\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"{situacao} - {porc}% ocupado\n\n"
-                f"🟢 Disponíveis: {livres}\n"
-                f"🔴 Em Corrida: {ocupados}\n"
-                f"🟡 Sem Rede: {imgs_amarelo}\n"
-                f"🚗 Total Online: {frota_ativa}\n"
-                f"━━━━━━━━━━━━━━━━━━"
-            )
-            enviar_mensagem_evolution(msg_stats, NOME_GRUPO_AVISOS)
-            time.sleep(1)
-
-            # Alerta Reforço
-            agora = time.time()
-            if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
-                enviar_mensagem_evolution(f"⚠️ *REFORÇO NECESSÁRIO:* Demanda alta ({porc}%).", NOME_GRUPO_AVISOS)
-                ultimo_aviso_reforco = agora
-        else:
-            print("⚠️ Mapa carregou mas está vazio (Zoom ou sem carros).")
+        # Alerta Reforço
+        agora = time.time()
+        if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
+            enviar_mensagem_evolution(f"⚠️ *REFORÇO NECESSÁRIO:* Demanda alta ({porc}%).", NOME_GRUPO_AVISOS)
+            ultimo_aviso_reforco = agora
 
     except Exception as e: 
         print(f"❌ Erro Frota: {e}")
-        try: driver.switch_to.default_content()
-        except: pass
 
 def tarefa_offline(driver):
     print("\n🔍 [OFFLINE - ABA 2] Buscando...")
