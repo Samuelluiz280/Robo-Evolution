@@ -215,12 +215,10 @@ def enviar_mensagem_evolution(mensagem, destinatarios):
 # 🛠️ 4. FERRAMENTAS DO SISTEMA
 # ==============================================================================
 def criar_driver_painel():
-    print(f"🦊 Iniciando Firefox (Modo VISUAL - Windows)...")
+    print(f"🦊 Iniciando Firefox (Modo Servidor/Headless)...")
     options = FirefoxOptions()
     
-    # Define um caminho para salvar o login no seu Windows
-    # O "." significa que vai criar a pasta dentro do projeto atual
-    caminho_perfil_windows = os.path.join(os.getcwd(), "perfil_firefox_painel")
+    
     
     if not os.path.exists(caminho_perfil_windows): 
         os.makedirs(caminho_perfil_windows)
