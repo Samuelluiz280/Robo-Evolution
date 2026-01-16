@@ -215,15 +215,32 @@ def enviar_mensagem_evolution(mensagem, destinatarios):
 # 🛠️ 4. FERRAMENTAS DO SISTEMA
 # ==============================================================================
 def criar_driver_painel():
-    print(f"🦊 Iniciando Firefox (Modo Full HD)...")
+    print(f"🦊 Iniciando Firefox (Modo Servidor Gráfico)...")
     options = FirefoxOptions()
-    if not os.path.exists(CAMINHO_PERFIL_PAINEL): os.makedirs(CAMINHO_PERFIL_PAINEL)
-    options.add_argument("-profile"); options.add_argument(CAMINHO_PERFIL_PAINEL)
+    
+    if not os.path.exists(CAMINHO_PERFIL_PAINEL): 
+        os.makedirs(CAMINHO_PERFIL_PAINEL)
+    
+    options.add_argument("-profile")
+    options.add_argument(CAMINHO_PERFIL_PAINEL)
+    
+    # --- CONFIGURAÇÕES CRÍTICAS PARA EASYPANEL/LINUX ---
     options.add_argument("--headless") 
+    
+    # Força um tamanho de tela gigante para garantir que o mapa renderize tudo
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("--width=1920"); options.add_argument("--height=1080")
-    options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-    options.add_argument("--no-sandbox"); options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--width=1920")
+    options.add_argument("--height=1080")
+    
+    # Engana o site dizendo que não somos um robô headless
+    options.set_preference("dom.webdriver.enabled", False)
+    options.set_preference("useAutomationExtension", False)
+    
+    # Otimizações de memória para não travar a VPS
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu") # Linux headless geralmente não tem GPU
+    
     servico = Service(GeckoDriverManager().install())
     return webdriver.Firefox(service=servico, options=options)
 
