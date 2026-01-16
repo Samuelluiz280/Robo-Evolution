@@ -303,74 +303,61 @@ def tarefa_dashboard(driver, enviar=True):
 
 def tarefa_frota(driver):
     global ultimo_aviso_reforco
-    print("\n🚗 [FROTA - ABA 2] Verificando...")
+    print("\n🚗 [FROTA - ABA 2] Verificando (Modo Google Maps)...")
     verificar_sessao_e_trocar_aba(driver, 1)
 
     try:
-        # 1. DIAGNÓSTICO RÁPIDO: Onde estamos?
-        # Se o título não tiver "Mapa" ou "MobFy", pode estar na tela errada
-        print(f"📍 Título da Página: {driver.title}")
-
+        # 1. Garante que estamos na URL certa
         if "vermapa" not in driver.current_url:
-            print("🔄 URL incorreta na Aba 2. Tentando recarregar via Dashboard...")
-            driver.get(URL_DASHBOARD); time.sleep(5)
-            try: driver.find_element(By.PARTIAL_LINK_TEXT, "Ver Mapa").click()
-            except: driver.get(URL_MAPA)
-            time.sleep(15)
+            print("🔄 URL incorreta. Tentando ir para o mapa...")
+            driver.get(URL_MAPA); time.sleep(15)
 
-        # 2. TENTATIVA DE ENTRAR EM IFRAME (Muito comum em Google Maps)
-        # Se houver um iframe, o robô mergulha nele para procurar os carros
-        if len(driver.find_elements(By.TAG_NAME, "iframe")) > 0:
-            print("🖼️ Iframe detectado! Tentando entrar no mapa...")
+        # 2. TÉCNICA GOOGLE MAPS: Buscar elementos 'role=button' ou com 'title'
+        print("👀 Escaneando marcadores do Google Maps...")
+        
+        # Pega todos os elementos que o Google define como "botões" no mapa
+        # Geralmente cada carro é um botão desses.
+        todos_botoes = driver.find_elements(By.CSS_SELECTOR, "div[role='button']")
+        
+        # Filtra apenas os que parecem carros (têm título ou são pinos)
+        carros_encontrados = []
+        for btn in todos_botoes:
             try:
-                # Tenta achar o iframe do mapa (geralmente o maior ou primeiro)
-                iframe = driver.find_elements(By.TAG_NAME, "iframe")[0]
-                driver.switch_to.frame(iframe)
+                titulo = btn.get_attribute("title")
+                label = btn.get_attribute("aria-label")
+                
+                # Se tiver um título (ex: "João - Placa ABC"), é um carro!
+                if titulo and len(titulo) > 1: 
+                    carros_encontrados.append(f"T:{titulo}")
+                # Se tiver label e não for botão de zoom ("Zoom in/out")
+                elif label and "Zoom" not in label and "Map" not in label:
+                    carros_encontrados.append(f"L:{label}")
             except: pass
 
-        # 3. CONTAGEM TURBINADA (Imagens + Divs + Clusters)
-        print("👀 Escaneando mapa...")
+        # 3. CONTAGEM
+        total = len(carros_encontrados)
         
-        # A. Busca Clássica (Imagens PNG)
-        livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde'], img[src*='green'], img[src*='free']"))
-        ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho'], img[src*='red'], img[src*='ocupado']"))
+        # Se achou carros, vamos tentar chutar quem está livre/ocupado
+        # Infelizmente sem ver a cor, assumimos uma média ou jogamos tudo pra ocupado pra garantir
+        # Mas pelo menos o total estará certo.
+        livres = 0 
+        ocupados = total 
         
-        # B. Busca por DIVs (Marcadores modernos do Google Maps)
-        # Muitas vezes o carro é uma DIV com role='button' ou background-image
-        if livres == 0 and ocupados == 0:
-            # Procura elementos que parecem botões no mapa (pinos)
-            pinos_div = driver.find_elements(By.CSS_SELECTOR, "div[role='button']")
-            # Filtra os que são muito pequenos ou controles de zoom
-            pinos_validos = [p for p in pinos_div if p.size['width'] > 20 and "Zoom" not in p.get_attribute("title")]
-            
-            if len(pinos_validos) > 0:
-                print(f"⚠️ Achei {len(pinos_validos)} pinos do tipo DIV. Usando contagem mista.")
-                # Como não sabemos a cor da DIV, jogamos tudo em ocupados para alertar (ou divide 50%)
-                ocupados = len(pinos_validos)
+        # Tenta refinar pela imagem DENTRO do botão (se existir)
+        if total > 0:
+            try:
+                # Procura imagens dentro dos botões achados
+                imgs_verde = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
+                if imgs_verde > 0:
+                    livres = imgs_verde
+                    ocupados = total - livres
+            except: pass
 
-        # C. Busca por CLUSTERS (Bolinhas com números)
-        # Se o mapa estiver muito longe, ele agrupa os carros.
-        # Procuramos divs que contenham apenas números (ex: "15", "5")
-        if livres == 0 and ocupados == 0:
-            clusters = driver.find_elements(By.CSS_SELECTOR, "div")
-            total_cluster = 0
-            for c in clusters:
-                # Se o texto for um número pequeno (ex: '5') e o elemento for pequeno (cluster)
-                if c.text.isdigit() and len(c.text) <= 3 and c.size['width'] < 60 and c.size['width'] > 20:
-                    try: total_cluster += int(c.text)
-                    except: pass
-            
-            if total_cluster > 0:
-                print(f"⚠️ Mapa Agrupado (Cluster)! Detectei aprox. {total_cluster} veículos.")
-                ocupados = total_cluster # Assume total
+        print(f"🔢 Frota Detectada via Marcadores: {total}")
+        if total > 0:
+            print(f"📝 Exemplos achados: {carros_encontrados[:3]}") # Mostra os 3 primeiros nomes
 
-        # Sai do iframe se entrou
-        driver.switch_to.default_content()
-
-        total = livres + ocupados
-        print(f"🔢 Frota Detectada: {total} (L:{livres}/O:{ocupados})")
-        
-        # --- LÓGICA DE ENVIO (IGUAL AO ANTERIOR) ---
+        # --- LÓGICA DE ENVIO ---
         if total > estatisticas_dia['pico']:
             estatisticas_dia['pico'] = total; estatisticas_dia['hora_pico'] = time.strftime('%H:%M'); salvar_dados()
         
@@ -379,17 +366,14 @@ def tarefa_frota(driver):
             status = "🟢" if porc <= 40 else "🟡" if porc <= 75 else "🔴 ALTA"
             msg = (
             f"📊 *STATUS FROTA | {time.strftime('%H:%M')}*\n"
-            f"{status} - {porc}% ocupado\n🟢 Livres: {livres}\n🔴 Ocupados: {ocupados}\n🚗 Total: {total}"
+            f"{status} - {porc}% ocupado (Estimado)\n🚗 Total: {total}"
             )
             enviar_mensagem_evolution(msg, NOME_GRUPO_AVISOS)
             
             agora = time.time()
             if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
-                enviar_mensagem_evolution(f"⚠️ *REFORÇO:* Demanda alta ({porc}%).", NOME_GRUPO_AVISOS)
+                enviar_mensagem_evolution(f"⚠️ *REFORÇO:* Demanda alta (+{porc}%).", NOME_GRUPO_AVISOS)
                 ultimo_aviso_reforco = agora
-
-    except SystemExit: raise
-    except Exception as e: print(f"❌ Erro Frota: {e}")
 
     except SystemExit: raise
     except Exception as e: print(f"❌ Erro Frota: {e}")
