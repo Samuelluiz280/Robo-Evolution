@@ -215,28 +215,15 @@ def enviar_mensagem_evolution(mensagem, destinatarios):
 # 🛠️ 4. FERRAMENTAS DO SISTEMA
 # ==============================================================================
 def criar_driver_painel():
-    print(f"🦊 Iniciando Firefox (Modo Com Janela)...")
+    print(f"🦊 Iniciando Firefox (Modo Full HD)...")
     options = FirefoxOptions()
-    
-    if not os.path.exists(CAMINHO_PERFIL_PAINEL): 
-        os.makedirs(CAMINHO_PERFIL_PAINEL)
-        
-    options.add_argument("-profile")
-    options.add_argument(CAMINHO_PERFIL_PAINEL)
-    
-    # ---------------------------------------------------------
-    # COMENTE OU APAGUE A LINHA ABAIXO PARA VER A JANELA:
-    # options.add_argument("--headless") 
-    # ---------------------------------------------------------
-
+    if not os.path.exists(CAMINHO_PERFIL_PAINEL): os.makedirs(CAMINHO_PERFIL_PAINEL)
+    options.add_argument("-profile"); options.add_argument(CAMINHO_PERFIL_PAINEL)
+    options.add_argument("--headless") 
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("--width=1920")
-    options.add_argument("--height=1080")
-    
+    options.add_argument("--width=1920"); options.add_argument("--height=1080")
     options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    
+    options.add_argument("--no-sandbox"); options.add_argument("--disable-dev-shm-usage")
     servico = Service(GeckoDriverManager().install())
     return webdriver.Firefox(service=servico, options=options)
 
@@ -329,6 +316,10 @@ def tarefa_monitorar_frota(driver):
         # --- TRAVA DE SEGURANÇA DE URL (AQUI É O PULO DO GATO) ---
         url_atual = driver.current_url
         print(f"🔗 URL Atual da Aba: {url_atual}")
+        
+        # Logo após o comando driver.get(url) ou antes de começar a contagem:
+        print("📸 Tirando foto da tela para debug...")
+        driver.save_screenshot("debug_erro.png")
 
         if "vermapa" not in url_atual:
             print(f"🚫 Ops! Não estou no mapa. Forçando ida para: {URL_MAPA}")
