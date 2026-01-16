@@ -309,7 +309,7 @@ def tarefa_monitorar_frota(driver):
     print("\n🚗 [FROTA - ABA 1] Iniciando verificação...")
     
     try:
-        # 1. Garante que estamos na aba do mapa
+        # 1 Garante que estamos na aba do mapa
         if not verificar_sessao_e_trocar_aba(driver, 1):
             return
 
