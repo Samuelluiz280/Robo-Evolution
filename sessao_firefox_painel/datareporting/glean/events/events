@@ -1,0 +1,20 @@
+{"timestamp":600395755,"category":"session_restore","name":"backup_can_be_loaded_session_file","extra":{"loadfail_reason":"File doesn't exist.","glean_timestamp":"1768579341669","can_load":"false","path_key":"clean"}}
+{"timestamp":600395777,"category":"session_restore","name":"backup_can_be_loaded_session_file","extra":{"can_load":"false","loadfail_reason":"File doesn't exist.","path_key":"recovery","glean_timestamp":"1768579341691"}}
+{"timestamp":600395814,"category":"session_restore","name":"backup_can_be_loaded_session_file","extra":{"glean_timestamp":"1768579341728","can_load":"false","path_key":"recoveryBackup","loadfail_reason":"File doesn't exist."}}
+{"timestamp":600395834,"category":"session_restore","name":"backup_can_be_loaded_session_file","extra":{"can_load":"false","loadfail_reason":"File doesn't exist.","path_key":"cleanBackup","glean_timestamp":"1768579341748"}}
+{"timestamp":600395906,"category":"session_restore","name":"backup_can_be_loaded_session_file","extra":{"can_load":"false","path_key":"clean","loadfail_reason":"File doesn't exist.","glean_timestamp":"1768579341820"}}
+{"timestamp":600395984,"category":"session_restore","name":"backup_can_be_loaded_session_file","extra":{"glean_timestamp":"1768579341897","loadfail_reason":"File doesn't exist.","can_load":"false","path_key":"recovery"}}
+{"timestamp":600396010,"category":"session_restore","name":"backup_can_be_loaded_session_file","extra":{"can_load":"false","glean_timestamp":"1768579341924","loadfail_reason":"File doesn't exist.","path_key":"recoveryBackup"}}
+{"timestamp":600396018,"category":"session_restore","name":"backup_can_be_loaded_session_file","extra":{"path_key":"cleanBackup","glean_timestamp":"1768579341931","can_load":"false","loadfail_reason":"File doesn't exist."}}
+{"timestamp":600396768,"category":"webcompatreporting","name":"reason_dropdown","extra":{"glean_timestamp":"1768579342682","setting":"required"}}
+{"timestamp":600397073,"category":"nimbus_events","name":"migration","extra":{"migration_id":"multi-phase-migrations","glean_timestamp":"1768579342987","success":"true"}}
+{"timestamp":600397450,"category":"nimbus_events","name":"migration","extra":{"glean_timestamp":"1768579343364","success":"true","migration_id":"noop"}}
+{"timestamp":600397450,"category":"nimbus_events","name":"migration","extra":{"success":"true","glean_timestamp":"1768579343364","migration_id":"noop"}}
+{"timestamp":600397451,"category":"nimbus_events","name":"migration","extra":{"success":"true","migration_id":"import-enrollments-to-sql","glean_timestamp":"1768579343364"}}
+{"timestamp":600397503,"category":"jsonfile","name":"load_autofillprofiles","extra":{"value":"error_notfounderror","glean_timestamp":"1768579343417"}}
+{"timestamp":600397611,"category":"containers","name":"container_profile_loaded","extra":{"containers":"4","glean_timestamp":"1768579343525"}}
+{"timestamp":600398002,"category":"jsonfile","name":"load_logins","extra":{"glean_timestamp":"1768579343916","value":"error_notfounderror"}}
+{"timestamp":600398062,"category":"upgrade_dialog","name":"trigger_reason","extra":{"value":"not-major","glean_timestamp":"1768579343976"}}
+{"timestamp":600399318,"category":"nimbus_events","name":"is_ready","extra":{"glean_timestamp":"1768579345232"}}
+{"timestamp":600399382,"category":"nimbus_events","name":"migration","extra":{"glean_timestamp":"1768579345296","success":"true","migration_id":"firefox-labs-enrollments"}}
+{"timestamp":600400723,"category":"nimbus_events","name":"database_write","extra":{"glean_timestamp":"1768579346637","success":"true"}}
