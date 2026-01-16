@@ -13,6 +13,9 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from webdriver_manager.firefox import GeckoDriverManager
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 # ==============================================================================
 # ⚙️ 1. CONFIGURAÇÕES GERAIS
@@ -301,42 +304,58 @@ def tarefa_dashboard(driver, enviar=True):
         return sol, con, perdidas
     except: return 0, 0, 0
 
-def tarefa_monitorar_frota(driver): # Removido o nome 'driver_painel' para padronizar
+def tarefa_monitorar_frota(driver):
     global ultimo_aviso_reforco, estatisticas_dia
     print("\n🚗 [FROTA - ABA 1] Analisando ocupação...")
     
     try:
-        # CORREÇÃO CRÍTICA:
-        # Não fazemos .get(URL). Apenas trocamos para a Aba 1 (onde o mapa já deve estar)
+        # 1. Troca de aba
         if not verificar_sessao_e_trocar_aba(driver, 1):
             return
 
-        # Como o mapa já está aberto, verificamos se ele carregou os elementos
-        # Se não encontrar nada, talvez precise de um refresh pontual
+        # 2. ESPERA INTELIGENTE (A Mágica acontece aqui)
+        # O robô vai esperar até 30 segundos para encontrar QUALQUER carro (verde, vermelho ou ocupado)
+        # Se carregar em 2 segundos, ele segue. Se demorar 29, ele espera.
         try:
-            # Espera breve para garantir que o DOM está acessível após a troca de aba
-            time.sleep(1) 
-            livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
-            ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho']")) + \
-                       len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
-        except:
-            # Se der erro de leitura, aí sim tentamos recarregar APENAS essa aba
-            print("⚠️ Mapa instável, recarregando aba...")
-            driver.refresh()
-            time.sleep(8)
-            return # Pula este ciclo e tenta no próximo
+            wd_wait = WebDriverWait(driver, 30)
+            wd_wait.until(EC.presence_of_element_located((
+                By.CSS_SELECTOR, 
+                "img[src*='verde'], img[src*='vermelho'], img[src*='ocupado']"
+            )))
+            
+            # 3. Buffer de Segurança
+            # Assim que o PRIMEIRO carro aparece, esperamos mais 5 segundos 
+            # para garantir que o mapa carregue o RESTO da frota.
+            time.sleep(5) 
+            
+        except TimeoutException:
+            print("⚠️ Tempo esgotado: Mapa carregou, mas sem carros visíveis (ou 0 carros).")
+            # Opcional: Tentar um refresh se achar que travou
+            # driver.refresh(); return 
+
+        # 4. Contagem (Agora mais segura)
+        livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
+        ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho']")) + \
+                   len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
         
         frota_ativa = livres + ocupados
         
-        # --- Lógica de Pico (Mantida) ---
+        print(f"🔍 Leitura: {livres} Livres | {ocupados} Ocupados | Total: {frota_ativa}")
+
+        # Se depois de esperar, ainda vier 0, ignoramos para não dar alerta falso
+        if frota_ativa == 0:
+            print("⚠️ Leitura zerada ignorada (provável delay de renderização).")
+            return
+
+        # --- Daqui para baixo segue a lógica normal ---
+        
         if frota_ativa > estatisticas_dia['pico']:
             estatisticas_dia['pico'] = frota_ativa
             estatisticas_dia['hora_pico'] = time.strftime('%H:%M')
-            salvar_dados() 
+            salvar_dados()
 
         porc = round((ocupados / frota_ativa) * 100) if frota_ativa > 0 else 0
         
-        # Termômetro Técnico
         situacao = "Demanda Baixa" if porc < 40 else "Demanda Moderada" if porc < 75 else "ALTA DEMANDA"
 
         msg_stats = (
@@ -354,7 +373,6 @@ def tarefa_monitorar_frota(driver): # Removido o nome 'driver_painel' para padro
 
         agora = time.time()
         
-        # Avisos de Reforço (Lógica mantida)
         if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
             opcoes_impacto = [
                 f"⚠️ *AVISO DE DEMANDA:* Ocupação da frota em {porc}%. Necessário reforço🚨",
