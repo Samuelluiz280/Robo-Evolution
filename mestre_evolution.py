@@ -306,13 +306,23 @@ def tarefa_dashboard(driver, enviar=True):
 
 def tarefa_monitorar_frota(driver):
     global ultimo_aviso_reforco, estatisticas_dia
-    print("\n🚗 [FROTA - ABA 1] Analisando ocupação (Modo Pin Exato)...")
+    print("\n🚗 [FROTA - ABA 1] Iniciando verificação...")
     
     try:
         # 1. Garante que estamos na aba do mapa
         if not verificar_sessao_e_trocar_aba(driver, 1):
             return
 
+        # --- TRAVA DE SEGURANÇA DE URL (AQUI É O PULO DO GATO) ---
+        url_atual = driver.current_url
+        print(f"🔗 URL Atual da Aba: {url_atual}")
+
+        if "vermapa" not in url_atual:
+            print(f"🚫 Ops! Não estou no mapa. Forçando ida para: {URL_MAPA}")
+            driver.get(URL_MAPA)
+            print("⏳ Aguardando carregamento forçado (15s)...")
+            time.sleep(15)
+        
         # 2. DETECTOR DE IFRAME
         try:
             iframe = WebDriverWait(driver, 5).until(
@@ -323,60 +333,48 @@ def tarefa_monitorar_frota(driver):
         except:
             print("ℹ️ Mapa na raiz (sem iframe).")
 
-        # 3. AGUARDA O MAPA RENDERIZAR E OS PINOS APARECEREM
-        # A tag gmp-advanced-marker é a chave que vimos no seu print
+        # 3. AGUARDA O MAPA RENDERIZAR
+        # Espera aparecer os marcadores modernos que vimos no seu HTML (gmp-advanced-marker)
         try:
             WebDriverWait(driver, 30).until(
                 EC.presence_of_element_located((By.TAG_NAME, "gmp-advanced-marker"))
             )
-            # Dá um tempo extra para as imagens dentro dos marcadores carregarem
-            time.sleep(5) 
+            time.sleep(5) # Delay extra para as imagens carregarem
         except TimeoutException:
-            print("⚠️ Erro: Marcadores (gmp-advanced-marker) não apareceram.")
-            driver.switch_to.default_content()
-            return
+            print("⚠️ Erro: Marcadores do Google não apareceram. Tentando contar mesmo assim...")
 
-        # --- 4. CONTAGEM CIRÚRGICA (Baseada no seu Print HTML) ---
-        print("👀 Contando pinos pelo nome do arquivo...")
+        # --- 4. CONTAGEM PELO NOME DO ARQUIVO (PIN-VERMELHO) ---
+        # Baseado no seu print do HTML, o nome é 'pin-vermelho.png', 'pin-verde.png'
+        print("👀 Contando pinos visualmente...")
 
-        # Busca imagens que contenham exatamente o nome que vimos no HTML
-        # O seletor 'img[src*="..."]' procura qualquer imagem que tenha esse texto no link
         imgs_verde = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='pin-verde']"))
         imgs_vermelho = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='pin-vermelho']"))
-        
-        # O amarelo é offline/sem rede (conforme você explicou)
         imgs_amarelo = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='pin-amarelo']"))
 
-        # --- 5. LÓGICA DE AGENDAMENTOS/CLUSTERS (Opcional, mas bom ter) ---
-        # Às vezes o mapa agrupa (bolinhas com números). Vamos tentar somar se houver.
+        # --- 5. TENTATIVA DE LER CLUSTERS (BOLINHAS COM NÚMEROS) ---
         total_clusters = 0
         try:
-            # Procura divs pequenas com números (indicador de cluster do Google)
+            # Procura divs pequenas que tenham números (ex: "5", "10")
             divs_cluster = driver.find_elements(By.XPATH, "//div[string-length(text()) > 0 and string-length(text()) <= 3]")
             for div in divs_cluster:
-                # Se for um número e tiver o tamanho de uma bolinha
                 if div.text.isdigit() and div.size['width'] < 50 and div.size['width'] > 20:
                     total_clusters += int(div.text)
         except: pass
 
         # --- 6. TOTALIZAÇÃO ---
-        # Consideramos Frota Ativa apenas Verde (Livre) + Vermelho (Corrida)
-        # Amarelo é problema de rede, então contamos separado ou somamos no total geral dependendo da sua regra.
-        # Aqui vou somar no total logado, mas calcular a ocupação baseada nos ativos.
-        
         frota_ativa = imgs_verde + imgs_vermelho + total_clusters
         
-        # Se tiver cluster, assumimos que são ocupados para segurança (ou divide proporcionalmente)
+        # Assume cluster como ocupado (já que não sabemos a cor de dentro)
         ocupados = imgs_vermelho + total_clusters 
         livres = imgs_verde
         
-        # Sai do iframe
+        # Sai do iframe se entrou
         driver.switch_to.default_content()
 
-        print(f"🏁 Resultado: 🟢 Livres: {imgs_verde} | 🔴 Ocupados: {imgs_vermelho} | 🟡 Offline: {imgs_amarelo} | 📦 Cluster: {total_clusters}")
+        print(f"🏁 Resultado: 🟢 L:{imgs_verde} | 🔴 O:{imgs_vermelho} | 🟡 Off:{imgs_amarelo} | 📦 Cluster:{total_clusters}")
 
         if frota_ativa == 0 and imgs_amarelo == 0:
-            print("⚠️ Leitura zerada. O mapa pode estar vazio ou com zoom muito distante.")
+            print("⚠️ Leitura zerada. Verifique se o mapa carregou visualmente.")
             return
 
         # --- RELATÓRIOS ---
@@ -388,7 +386,6 @@ def tarefa_monitorar_frota(driver):
         porc = round((ocupados / frota_ativa) * 100) if frota_ativa > 0 else 0
         situacao = "🟢" if porc < 40 else "🟡" if porc < 75 else "🔴 ALTA"
 
-        # Mensagem formatada
         msg_stats = (
             f"📊 *STATUS DA FROTA | {time.strftime('%H:%M')}*\n"
             f"━━━━━━━━━━━━━━━━━━\n"
@@ -402,7 +399,6 @@ def tarefa_monitorar_frota(driver):
         enviar_mensagem_evolution(msg_stats, NOME_GRUPO_AVISOS)
         time.sleep(1)
 
-        # Alerta de Reforço
         agora = time.time()
         if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
             enviar_mensagem_evolution(f"⚠️ *REFORÇO NECESSÁRIO:* Demanda alta ({porc}%).", NOME_GRUPO_AVISOS)
@@ -412,7 +408,7 @@ def tarefa_monitorar_frota(driver):
         print(f"❌ Erro Frota: {e}")
         try: driver.switch_to.default_content()
         except: pass
-        
+
 def tarefa_offline(driver):
     print("\n🔍 [OFFLINE - ABA 2] Buscando...")
     # Muda para ABA 1 (Mapa)
