@@ -309,53 +309,71 @@ def tarefa_monitorar_frota(driver):
     print("\n🚗 [FROTA - ABA 1] Analisando ocupação...")
     
     try:
-        # 1. Troca de aba
+        # 1. Garante que estamos na aba do mapa
         if not verificar_sessao_e_trocar_aba(driver, 1):
             return
 
-        # 2. ESPERA INTELIGENTE (A Mágica acontece aqui)
-        # O robô vai esperar até 30 segundos para encontrar QUALQUER carro (verde, vermelho ou ocupado)
-        # Se carregar em 2 segundos, ele segue. Se demorar 29, ele espera.
+        # 2. DETECTOR DE IFRAME (MUITO IMPORTANTE PARA MAPAS)
+        # Se o mapa estiver dentro de um iframe, o Selenium não vê nada se não entrar nele.
+        try:
+            iframe = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "iframe[src*='google'], iframe[id*='map']"))
+            )
+            print("🖼️ Iframe de mapa detectado! Entrando nele...")
+            driver.switch_to.frame(iframe)
+        except:
+            print("ℹ️ Nenhum iframe óbvio encontrado (ou mapa está na raiz). Seguindo...")
+
+        # 3. ESPERA A "CAIXA" DO GOOGLE MAPS CARREGAR
+        # A classe 'gm-style' é padrão do Google Maps. Se ela não aparecer, o mapa não carregou.
         try:
             wd_wait = WebDriverWait(driver, 30)
-            wd_wait.until(EC.presence_of_element_located((
-                By.CSS_SELECTOR, 
-                "img[src*='verde'], img[src*='vermelho'], img[src*='ocupado']"
-            )))
-            
-            # 3. Buffer de Segurança
-            # Assim que o PRIMEIRO carro aparece, esperamos mais 5 segundos 
-            # para garantir que o mapa carregue o RESTO da frota.
-            time.sleep(5) 
-            
+            wd_wait.until(EC.presence_of_element_located((By.CLASS_NAME, "gm-style")))
+            # Dá um tempo extra para os "pinos" (carros) serem desenhados no canvas
+            time.sleep(8) 
         except TimeoutException:
-            print("⚠️ Tempo esgotado: Mapa carregou, mas sem carros visíveis (ou 0 carros).")
-            # Opcional: Tentar um refresh se achar que travou
-            # driver.refresh(); return 
-
-        # 4. Contagem (Agora mais segura)
-        livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
-        ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho']")) + \
-                   len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
-        
-        frota_ativa = livres + ocupados
-        
-        print(f"🔍 Leitura: {livres} Livres | {ocupados} Ocupados | Total: {frota_ativa}")
-
-        # Se depois de esperar, ainda vier 0, ignoramos para não dar alerta falso
-        if frota_ativa == 0:
-            print("⚠️ Leitura zerada ignorada (provável delay de renderização).")
+            print("⚠️ Erro: O Google Maps não carregou (classe gm-style não encontrada).")
+            driver.save_screenshot("erro_mapa_nao_carregou.png")
+            driver.switch_to.default_content() # Sai do iframe se tiver entrado
             return
 
-        # --- Daqui para baixo segue a lógica normal ---
+        # 4. ESPIÃO DE IMAGENS (DEBUG)
+        # Vamos listar quais imagens o robô está vendo para ajustar os nomes "verde/vermelho"
+        imgs_encontradas = driver.find_elements(By.CSS_SELECTOR, "img")
+        print(f"🔎 O robô enxerga {len(imgs_encontradas)} imagens no total.")
         
+        # Mostra o nome das 5 primeiras imagens para você conferir nos logs
+        # Isso ajuda a descobrir se o nome do arquivo mudou (ex: de 'verde' para 'pin_online')
+        if len(imgs_encontradas) > 0:
+            print("📝 Exemplos de imagens encontradas:")
+            for img in imgs_encontradas[:5]:
+                src = img.get_attribute('src')
+                if src: print(f"   -> {src.split('/')[-1]}") # Mostra só o final do link
+
+        # 5. CONTAGEM (Ajuste os nomes aqui baseado no Log do passo 4 se precisar)
+        # Dica: Use seletores parciais (*=) para ser mais flexível
+        livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde'], img[src*='online'], img[src*='green']"))
+        
+        ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho'], img[src*='corrida'], img[src*='red']")) + \
+                   len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
+        
+        # Volta para o contexto principal (sai do iframe) para não travar o resto do script
+        driver.switch_to.default_content()
+
+        frota_ativa = livres + ocupados
+        print(f"🏁 Contagem Final: {livres} Livres | {ocupados} Ocupados | Total: {frota_ativa}")
+
+        if frota_ativa == 0:
+            print("⚠️ Leitura zerada. Verifique os nomes das imagens nos logs acima.")
+            return
+
+        # --- LÓGICA DE AVISOS (Mantida igual) ---
         if frota_ativa > estatisticas_dia['pico']:
             estatisticas_dia['pico'] = frota_ativa
             estatisticas_dia['hora_pico'] = time.strftime('%H:%M')
             salvar_dados()
 
         porc = round((ocupados / frota_ativa) * 100) if frota_ativa > 0 else 0
-        
         situacao = "Demanda Baixa" if porc < 40 else "Demanda Moderada" if porc < 75 else "ALTA DEMANDA"
 
         msg_stats = (
@@ -367,24 +385,21 @@ def tarefa_monitorar_frota(driver):
             f"🚗 Total Logado: {frota_ativa}\n"
             f"━━━━━━━━━━━━━━━━━━"
         )
-        
         enviar_mensagem_evolution(msg_stats, NOME_GRUPO_AVISOS)
-        time.sleep(1) 
+        time.sleep(1)
 
         agora = time.time()
-        
         if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
-            opcoes_impacto = [
-                f"⚠️ *AVISO DE DEMANDA:* Ocupação da frota em {porc}%. Necessário reforço🚨",
-                f"📈 *ALTO FLUXO:* Solicitações pendentes aumentando.",
-                f"🔔 *OPORTUNIDADE:* Alta demanda de corridas na região. Ocupação crítica."
+            opcoes = [
+                f"⚠️ *AVISO:* Ocupação em {porc}%. Reforço necessário!",
+                f"📈 *ALTA DEMANDA:* Poucos carros livres.",
             ]
-            msg_reforco = random.choice(opcoes_impacto)
-            enviar_mensagem_evolution(msg_reforco, NOME_GRUPO_AVISOS)
+            enviar_mensagem_evolution(random.choice(opcoes), NOME_GRUPO_AVISOS)
             ultimo_aviso_reforco = agora
 
     except Exception as e: 
         print(f"❌ Erro Frota: {e}")
+        driver.switch_to.default_content() # Segurança para não travar no iframe
 
 def tarefa_offline(driver):
     print("\n🔍 [OFFLINE - ABA 2] Buscando...")
