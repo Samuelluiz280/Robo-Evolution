@@ -323,83 +323,94 @@ def tarefa_dashboard(driver, enviar=True):
 
 def tarefa_monitorar_frota(driver):
     global ultimo_aviso_reforco, estatisticas_dia
-    print("\n🚗 [FROTA - ABA 1] Analisando ocupação...")
+    print("\n🚗 [FROTA - ABA 1] Iniciando verificação...")
     
     try:
-        # 1. Garante que estamos na aba do mapa
+        # 1 Garante que estamos na aba do mapa
         if not verificar_sessao_e_trocar_aba(driver, 1):
             return
 
-        # 2. DETECTOR DE IFRAME (MUITO IMPORTANTE PARA MAPAS)
-        # Se o mapa estiver dentro de um iframe, o Selenium não vê nada se não entrar nele.
+        # --- TRAVA DE SEGURANÇA DE URL (AQUI É O PULO DO GATO) ---
+        url_atual = driver.current_url
+        print(f"🔗 URL Atual da Aba: {url_atual}")
+
+        if "vermapa" not in url_atual:
+            print(f"🚫 Ops! Não estou no mapa. Forçando ida para: {URL_MAPA}")
+            driver.get(URL_MAPA)
+            print("⏳ Aguardando carregamento forçado (15s)...")
+            time.sleep(15)
+        
+        # 2. DETECTOR DE IFRAME
         try:
             iframe = WebDriverWait(driver, 5).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "iframe[src*='google'], iframe[id*='map']"))
             )
-            print("🖼️ Iframe de mapa detectado! Entrando nele...")
+            print("🖼️ Iframe detectado. Entrando...")
             driver.switch_to.frame(iframe)
         except:
-            print("ℹ️ Nenhum iframe óbvio encontrado (ou mapa está na raiz). Seguindo...")
+            print("ℹ️ Mapa na raiz (sem iframe).")
 
-        # 3. ESPERA A "CAIXA" DO GOOGLE MAPS CARREGAR
-        # A classe 'gm-style' é padrão do Google Maps. Se ela não aparecer, o mapa não carregou.
+        # 3. AGUARDA O MAPA RENDERIZAR
+        # Espera aparecer os marcadores modernos que vimos no seu HTML (gmp-advanced-marker)
         try:
-            wd_wait = WebDriverWait(driver, 30)
-            wd_wait.until(EC.presence_of_element_located((By.CLASS_NAME, "gm-style")))
-            # Dá um tempo extra para os "pinos" (carros) serem desenhados no canvas
-            time.sleep(8) 
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.TAG_NAME, "gmp-advanced-marker"))
+            )
+            time.sleep(5) # Delay extra para as imagens carregarem
         except TimeoutException:
-            print("⚠️ Erro: O Google Maps não carregou (classe gm-style não encontrada).")
-            driver.save_screenshot("erro_mapa_nao_carregou.png")
-            driver.switch_to.default_content() # Sai do iframe se tiver entrado
-            return
+            print("⚠️ Erro: Marcadores do Google não apareceram. Tentando contar mesmo assim...")
 
-        # 4. ESPIÃO DE IMAGENS (DEBUG)
-        # Vamos listar quais imagens o robô está vendo para ajustar os nomes "verde/vermelho"
-        imgs_encontradas = driver.find_elements(By.CSS_SELECTOR, "img")
-        print(f"🔎 O robô enxerga {len(imgs_encontradas)} imagens no total.")
-        
-        # Mostra o nome das 5 primeiras imagens para você conferir nos logs
-        # Isso ajuda a descobrir se o nome do arquivo mudou (ex: de 'verde' para 'pin_online')
-        if len(imgs_encontradas) > 0:
-            print("📝 Exemplos de imagens encontradas:")
-            for img in imgs_encontradas[:5]:
-                src = img.get_attribute('src')
-                if src: print(f"   -> {src.split('/')[-1]}") # Mostra só o final do link
+        # --- 4. CONTAGEM PELO NOME DO ARQUIVO (PIN-VERMELHO) ---
+        # Baseado no seu print do HTML, o nome é 'pin-vermelho.png', 'pin-verde.png'
+        print("👀 Contando pinos visualmente...")
 
-        # 5. CONTAGEM (Ajuste os nomes aqui baseado no Log do passo 4 se precisar)
-        # Dica: Use seletores parciais (*=) para ser mais flexível
-        livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde'], img[src*='online'], img[src*='green']"))
+        imgs_verde = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='pin-verde']"))
+        imgs_vermelho = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='pin-vermelho']"))
+        imgs_amarelo = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='pin-amarelo']"))
+
+        # --- 5. TENTATIVA DE LER CLUSTERS (BOLINHAS COM NÚMEROS) ---
+        total_clusters = 0
+        try:
+            # Procura divs pequenas que tenham números (ex: "5", "10")
+            divs_cluster = driver.find_elements(By.XPATH, "//div[string-length(text()) > 0 and string-length(text()) <= 3]")
+            for div in divs_cluster:
+                if div.text.isdigit() and div.size['width'] < 50 and div.size['width'] > 20:
+                    total_clusters += int(div.text)
+        except: pass
+
+        # --- 6. TOTALIZAÇÃO ---
+        frota_ativa = imgs_verde + imgs_vermelho + total_clusters
         
-        ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho'], img[src*='corrida'], img[src*='red']")) + \
-                   len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
+        # Assume cluster como ocupado (já que não sabemos a cor de dentro)
+        ocupados = imgs_vermelho + total_clusters 
+        livres = imgs_verde
         
-        # Volta para o contexto principal (sai do iframe) para não travar o resto do script
+        # Sai do iframe se entrou
         driver.switch_to.default_content()
 
-        frota_ativa = livres + ocupados
-        print(f"🏁 Contagem Final: {livres} Livres | {ocupados} Ocupados | Total: {frota_ativa}")
+        print(f"🏁 Resultado: 🟢 L:{imgs_verde} | 🔴 O:{imgs_vermelho} | 🟡 Off:{imgs_amarelo} | 📦 Cluster:{total_clusters}")
 
-        if frota_ativa == 0:
-            print("⚠️ Leitura zerada. Verifique os nomes das imagens nos logs acima.")
+        if frota_ativa == 0 and imgs_amarelo == 0:
+            print("⚠️ Leitura zerada. Verifique se o mapa carregou visualmente.")
             return
 
-        # --- LÓGICA DE AVISOS (Mantida igual) ---
+        # --- RELATÓRIOS ---
         if frota_ativa > estatisticas_dia['pico']:
             estatisticas_dia['pico'] = frota_ativa
             estatisticas_dia['hora_pico'] = time.strftime('%H:%M')
             salvar_dados()
 
         porc = round((ocupados / frota_ativa) * 100) if frota_ativa > 0 else 0
-        situacao = "Demanda Baixa" if porc < 40 else "Demanda Moderada" if porc < 75 else "ALTA DEMANDA"
+        situacao = "🟢" if porc < 40 else "🟡" if porc < 75 else "🔴 ALTA"
 
         msg_stats = (
             f"📊 *STATUS DA FROTA | {time.strftime('%H:%M')}*\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"{situacao} - {porc}% de ocupação\n\n"
+            f"{situacao} - {porc}% ocupado\n\n"
             f"🟢 Disponíveis: {livres}\n"
-            f"🔴 Em Atendimento: {ocupados}\n"
-            f"🚗 Total Logado: {frota_ativa}\n"
+            f"🔴 Em Corrida: {ocupados}\n"
+            f"🟡 Sem Rede: {imgs_amarelo}\n"
+            f"🚗 Total Online: {frota_ativa + imgs_amarelo}\n"
             f"━━━━━━━━━━━━━━━━━━"
         )
         enviar_mensagem_evolution(msg_stats, NOME_GRUPO_AVISOS)
@@ -407,16 +418,13 @@ def tarefa_monitorar_frota(driver):
 
         agora = time.time()
         if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
-            opcoes = [
-                f"⚠️ *AVISO:* Ocupação em {porc}%. Reforço necessário!",
-                f"📈 *ALTA DEMANDA:* Poucos carros livres.",
-            ]
-            enviar_mensagem_evolution(random.choice(opcoes), NOME_GRUPO_AVISOS)
+            enviar_mensagem_evolution(f"⚠️ *REFORÇO NECESSÁRIO:* Demanda alta ({porc}%).", NOME_GRUPO_AVISOS)
             ultimo_aviso_reforco = agora
 
     except Exception as e: 
         print(f"❌ Erro Frota: {e}")
-        driver.switch_to.default_content() # Segurança para não travar no iframe
+        try: driver.switch_to.default_content()
+        except: pass
 
 def tarefa_offline(driver):
     print("\n🔍 [OFFLINE - ABA 2] Buscando...")
