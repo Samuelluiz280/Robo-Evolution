@@ -301,82 +301,72 @@ def tarefa_dashboard(driver, enviar=True):
         return sol, con, perdidas
     except: return 0, 0, 0
 
-def tarefa_frota(driver):
-    global ultimo_aviso_reforco
-    print("\n🚗 [FROTA - ABA 2] Verificando (Modo Google Maps)...")
-    verificar_sessao_e_trocar_aba(driver, 1)
-
+def tarefa_monitorar_frota(driver): # Removido o nome 'driver_painel' para padronizar
+    global ultimo_aviso_reforco, estatisticas_dia
+    print("\n🚗 [FROTA - ABA 1] Analisando ocupação...")
+    
     try:
-        # 1. Garante que estamos na URL certa
-        if "vermapa" not in driver.current_url:
-            print("🔄 URL incorreta. Tentando ir para o mapa...")
-            driver.get(URL_MAPA); time.sleep(15)
+        # CORREÇÃO CRÍTICA:
+        # Não fazemos .get(URL). Apenas trocamos para a Aba 1 (onde o mapa já deve estar)
+        if not verificar_sessao_e_trocar_aba(driver, 1):
+            return
 
-        # 2. TÉCNICA GOOGLE MAPS: Buscar elementos 'role=button' ou com 'title'
-        print("👀 Escaneando marcadores do Google Maps...")
+        # Como o mapa já está aberto, verificamos se ele carregou os elementos
+        # Se não encontrar nada, talvez precise de um refresh pontual
+        try:
+            # Espera breve para garantir que o DOM está acessível após a troca de aba
+            time.sleep(1) 
+            livres = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
+            ocupados = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='vermelho']")) + \
+                       len(driver.find_elements(By.CSS_SELECTOR, "img[src*='ocupado']"))
+        except:
+            # Se der erro de leitura, aí sim tentamos recarregar APENAS essa aba
+            print("⚠️ Mapa instável, recarregando aba...")
+            driver.refresh()
+            time.sleep(8)
+            return # Pula este ciclo e tenta no próximo
         
-        # Pega todos os elementos que o Google define como "botões" no mapa
-        # Geralmente cada carro é um botão desses.
-        todos_botoes = driver.find_elements(By.CSS_SELECTOR, "div[role='button']")
+        frota_ativa = livres + ocupados
         
-        # Filtra apenas os que parecem carros (têm título ou são pinos)
-        carros_encontrados = []
-        for btn in todos_botoes:
-            try:
-                titulo = btn.get_attribute("title")
-                label = btn.get_attribute("aria-label")
-                
-                # Se tiver um título (ex: "João - Placa ABC"), é um carro!
-                if titulo and len(titulo) > 1: 
-                    carros_encontrados.append(f"T:{titulo}")
-                # Se tiver label e não for botão de zoom ("Zoom in/out")
-                elif label and "Zoom" not in label and "Map" not in label:
-                    carros_encontrados.append(f"L:{label}")
-            except: pass
+        # --- Lógica de Pico (Mantida) ---
+        if frota_ativa > estatisticas_dia['pico']:
+            estatisticas_dia['pico'] = frota_ativa
+            estatisticas_dia['hora_pico'] = time.strftime('%H:%M')
+            salvar_dados() 
 
-        # 3. CONTAGEM
-        total = len(carros_encontrados)
+        porc = round((ocupados / frota_ativa) * 100) if frota_ativa > 0 else 0
         
-        # Se achou carros, vamos tentar chutar quem está livre/ocupado
-        # Infelizmente sem ver a cor, assumimos uma média ou jogamos tudo pra ocupado pra garantir
-        # Mas pelo menos o total estará certo.
-        livres = 0 
-        ocupados = total 
+        # Termômetro Técnico
+        situacao = "Demanda Baixa" if porc < 40 else "Demanda Moderada" if porc < 75 else "ALTA DEMANDA"
+
+        msg_stats = (
+            f"📊 *STATUS DA FROTA | {time.strftime('%H:%M')}*\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"{situacao} - {porc}% de ocupação\n\n"
+            f"🟢 Disponíveis: {livres}\n"
+            f"🔴 Em Atendimento: {ocupados}\n"
+            f"🚗 Total Logado: {frota_ativa}\n"
+            f"━━━━━━━━━━━━━━━━━━"
+        )
         
-        # Tenta refinar pela imagem DENTRO do botão (se existir)
-        if total > 0:
-            try:
-                # Procura imagens dentro dos botões achados
-                imgs_verde = len(driver.find_elements(By.CSS_SELECTOR, "img[src*='verde']"))
-                if imgs_verde > 0:
-                    livres = imgs_verde
-                    ocupados = total - livres
-            except: pass
+        enviar_mensagem_evolution(msg_stats, NOME_GRUPO_AVISOS)
+        time.sleep(1) 
 
-        print(f"🔢 Frota Detectada via Marcadores: {total}")
-        if total > 0:
-            print(f"📝 Exemplos achados: {carros_encontrados[:3]}") # Mostra os 3 primeiros nomes
-
-        # --- LÓGICA DE ENVIO ---
-        if total > estatisticas_dia['pico']:
-            estatisticas_dia['pico'] = total; estatisticas_dia['hora_pico'] = time.strftime('%H:%M'); salvar_dados()
+        agora = time.time()
         
-        if total > 0:
-            porc = round((ocupados / total) * 100)
-            status = "🟢" if porc <= 40 else "🟡" if porc <= 75 else "🔴 ALTA"
-            msg = (
-            f"📊 *STATUS FROTA | {time.strftime('%H:%M')}*\n"
-            f"{status} - {porc}% ocupado (Estimado)\n🚗 Total: {total}"
-            )
-            enviar_mensagem_evolution(msg, NOME_GRUPO_AVISOS)
-            
-            agora = time.time()
-            if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
-                enviar_mensagem_evolution(f"⚠️ *REFORÇO:* Demanda alta (+{porc}%).", NOME_GRUPO_AVISOS)
-                ultimo_aviso_reforco = agora
+        # Avisos de Reforço (Lógica mantida)
+        if (porc >= PORCENTAGEM_CRITICA_OCUPACAO) and ((agora - ultimo_aviso_reforco)/60 >= TEMPO_COOLDOWN_REFORCO):
+            opcoes_impacto = [
+                f"⚠️ *AVISO DE DEMANDA:* Ocupação da frota em {porc}%. Necessário reforço🚨",
+                f"📈 *ALTO FLUXO:* Solicitações pendentes aumentando.",
+                f"🔔 *OPORTUNIDADE:* Alta demanda de corridas na região. Ocupação crítica."
+            ]
+            msg_reforco = random.choice(opcoes_impacto)
+            enviar_mensagem_evolution(msg_reforco, NOME_GRUPO_AVISOS)
+            ultimo_aviso_reforco = agora
 
-    except SystemExit: raise
-    except Exception as e: print(f"❌ Erro Frota: {e}")
+    except Exception as e: 
+        print(f"❌ Erro Frota: {e}")
 
 def tarefa_offline(driver):
     print("\n🔍 [OFFLINE - ABA 2] Buscando...")
@@ -461,7 +451,8 @@ if __name__ == "__main__":
                 tarefa_offline(driver); t_off = agora + (TEMPO_OFFLINE * 60)
             
             if agora >= t_frota: 
-                tarefa_frota(driver); t_frota = agora + (TEMPO_FROTA * 60)
+                # Nome corrigido aqui 👇
+                tarefa_monitorar_frota(driver); t_frota = agora + (TEMPO_FROTA * 60)
             
             if agora >= t_dash: 
                 tarefa_dashboard(driver); t_dash = agora + (TEMPO_CORRIDAS * 60)
