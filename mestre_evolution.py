@@ -218,21 +218,26 @@ def criar_driver_painel():
     print(f"🦊 Iniciando Firefox (Modo Servidor/Headless)...")
     options = FirefoxOptions()
     
-    
-    
+    # Cria pasta do perfil se não existir
     if not os.path.exists(CAMINHO_PERFIL_PAINEL): 
         os.makedirs(CAMINHO_PERFIL_PAINEL)
         
     options.add_argument("-profile")
     options.add_argument(CAMINHO_PERFIL_PAINEL)
     
-    # --- IMPORTANTE: COMENTE A LINHA ABAIXO PARA VER A TELA ---
-    # options.add_argument("--headless") 
-    # ----------------------------------------------------------
+    # --- OBRIGATÓRIO PARA SERVIDOR (EASYPANEL) ---
+    options.add_argument("--headless") 
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    # ---------------------------------------------
 
     options.add_argument("--window-size=1920,1080")
+    options.add_argument("--width=1920")
+    options.add_argument("--height=1080")
     
-    # O restante das configurações pode manter igual...
+    # User Agent para evitar bloqueios
+    options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    
     servico = Service(GeckoDriverManager().install())
     return webdriver.Firefox(service=servico, options=options)
 
