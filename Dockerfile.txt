@@ -8,6 +8,15 @@ RUN apt-get update && apt-get install -y \
     curl \
     unzip \
     gnupg \
+    libgtk-3-0 \
+    libdbus-glib-1-2 \
+    libx11-xcb1 \
+    libasound2 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxi6 \
+    libxtst6 \
+    libnss3 \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. Instala o Geckodriver (Versão Fixa v0.35.0 - Mais estável)
@@ -28,7 +37,7 @@ COPY . .
 
 # 6. Configurações para rodar sem tela (Headless)
 ENV PYTHONUNBUFFERED=1
-ENV DISPLAY=:99
+
 
 # 7. Comando de iniciar
 CMD ["python", "mestre_evolution.py"]
