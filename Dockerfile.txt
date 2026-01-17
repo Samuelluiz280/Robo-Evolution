@@ -3,7 +3,7 @@ FROM python:3.9-slim
 
 # 1. Instala Firefox e ferramentas do sistema
 RUN apt-get update && apt-get install -y \
-    firefox-esr \
+    chromium chromium-driver \
     wget \
     curl \
     unzip \
