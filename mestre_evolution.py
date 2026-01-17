@@ -11,9 +11,12 @@ import shutil
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys 
-from selenium.webdriver.firefox.service import Service
-from selenium.webdriver.firefox.options import Options as FirefoxOptions
-from webdriver_manager.firefox import GeckoDriverManager
+#from selenium.webdriver.firefox.service import Service
+#from selenium.webdriver.firefox.options import Options as FirefoxOptions
+#from webdriver_manager.firefox import GeckoDriverManager
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
@@ -216,41 +219,44 @@ def enviar_mensagem_evolution(mensagem, destinatarios):
 # 🛠️ 4. FERRAMENTAS DO SISTEMA
 # ==============================================================================
 def criar_driver_painel():
-    print(f"🦊 Iniciando Firefox (Modo Servidor/Headless)...")
-    
-    # --- LIMPEZA DE PERFIL TRAVADO ---
-    # Se o robô crashou antes, a pasta fica 'trancada'. Vamos resetar ela.
-    if os.path.exists(CAMINHO_PERFIL_PAINEL):
-        try:
-            print("🧹 Limpando sessão antiga travada...")
-            shutil.rmtree(CAMINHO_PERFIL_PAINEL)
-        except Exception as e:
-            print(f"⚠️ Não foi possível limpar a pasta de perfil: {e}")
-
-    # Recria a pasta limpa
-    if not os.path.exists(CAMINHO_PERFIL_PAINEL): 
-        os.makedirs(CAMINHO_PERFIL_PAINEL)
-        
-    options = FirefoxOptions()
-    options.add_argument("-profile")
-    options.add_argument(CAMINHO_PERFIL_PAINEL)
-    
-    # --- OBRIGATÓRIO PARA SERVIDOR (EASYPANEL) ---
-    # ATENÇÃO: Não coloque '#' na frente destas linhas!
-    options.add_argument("--headless") 
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    # ---------------------------------------------
-
+    print(f"🤖 Iniciando Chrome (Modo Headless=New)...")
+    options = ChromeOptions()
+   
+    # ==============================================================================
+    # 1. O SEGREDO DO CHROME (HEADLESS = NEW)
+    # ==============================================================================
+    # Isso faz o Chrome renderizar TUDO, inclusive WebGL e Mapas, sem tela.
+    options.add_argument("--headless=new")
+   
+    # ==============================================================================
+    # 2. BLINDAGEM PARA DOCKER/EASYPANEL
+    # ==============================================================================
+    options.add_argument("--no-sandbox") # Obrigatório em Docker
+    options.add_argument("--disable-dev-shm-usage") # Vital para memória
+    options.add_argument("--disable-gpu") # Evita erros gráficos no Linux
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("--width=1920")
-    options.add_argument("--height=1080")
-    
-    # User Agent para evitar bloqueios
-    options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-    
-    servico = Service(GeckoDriverManager().install())
-    return webdriver.Firefox(service=servico, options=options)
+    options.add_argument("--start-maximized")
+   
+    # Engana o site para achar que é um usuário normal
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+   
+    # Remove avisos de automação
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+
+    # ==============================================================================
+    # 3. INICIALIZAÇÃO COM GESTOR DE DRIVER
+    # ==============================================================================
+    try:
+        # Tenta baixar o driver compatível com o Chrome instalado
+        servico = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=servico, options=options)
+    except Exception as e:
+        print(f"❌ Erro ao iniciar Chrome: {e}")
+        print("⚠️ Verifique se o pacote 'chromium' está instalado no sistema (apt-get install chromium).")
+        raise e
+
+    return driver
 
 def ler_texto(driver, xpath):
     try:
