@@ -6,6 +6,7 @@ import re
 import gc
 import psutil 
 import sys
+import shutil
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -216,16 +217,26 @@ def enviar_mensagem_evolution(mensagem, destinatarios):
 # ==============================================================================
 def criar_driver_painel():
     print(f"🦊 Iniciando Firefox (Modo Servidor/Headless)...")
-    options = FirefoxOptions()
     
-    # Cria pasta do perfil se não existir
+    # --- LIMPEZA DE PERFIL TRAVADO ---
+    # Se o robô crashou antes, a pasta fica 'trancada'. Vamos resetar ela.
+    if os.path.exists(CAMINHO_PERFIL_PAINEL):
+        try:
+            print("🧹 Limpando sessão antiga travada...")
+            shutil.rmtree(CAMINHO_PERFIL_PAINEL)
+        except Exception as e:
+            print(f"⚠️ Não foi possível limpar a pasta de perfil: {e}")
+
+    # Recria a pasta limpa
     if not os.path.exists(CAMINHO_PERFIL_PAINEL): 
         os.makedirs(CAMINHO_PERFIL_PAINEL)
         
+    options = FirefoxOptions()
     options.add_argument("-profile")
     options.add_argument(CAMINHO_PERFIL_PAINEL)
     
     # --- OBRIGATÓRIO PARA SERVIDOR (EASYPANEL) ---
+    # ATENÇÃO: Não coloque '#' na frente destas linhas!
     options.add_argument("--headless") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
